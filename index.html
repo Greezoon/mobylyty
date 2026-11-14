@@ -5,53 +5,90 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MOBYLYTY</title>
   <style>
-    :root { --bg:#f4f5f7; --card:#ffffff; --text:#1d1f23; --muted:#6b7280; --ok:#15803d; --ko:#b91c1c; --btn:#1d1f23; --btnText:#ffffff; }
+    :root { --bg:#f4f5f7; --card:#ffffff; --text:#1d1f23; --muted:#6b7280; --line:#e5e7eb; --ko:#b91c1c; --chip:#eef0f3; }
     @media (prefers-color-scheme: dark) {
-      :root { --bg:#111318; --card:#1c1f26; --text:#e8eaed; --muted:#9aa0a6; --ok:#4ade80; --ko:#f87171; --btn:#e8eaed; --btnText:#111318; }
+      :root { --bg:#111318; --card:#1c1f26; --text:#e8eaed; --muted:#9aa0a6; --line:#2c313a; --ko:#f87171; --chip:#2a2f38; }
     }
+    * { box-sizing:border-box; }
     body {
-      margin:0; min-height:100vh; padding:20px; box-sizing:border-box;
-      display:flex; align-items:center; justify-content:center;
+      margin:0; background:var(--bg); color:var(--text);
       font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background:var(--bg); color:var(--text);
     }
+    .hidden { display:none !important; }
+
+    /* Écrans centrés : chargement et connexion */
+    .center { min-height:100vh; padding:20px; display:flex; align-items:center; justify-content:center; }
     .card {
       background:var(--card); border-radius:16px; padding:28px; width:100%; max-width:420px;
       box-shadow:0 4px 20px rgba(0,0,0,.08); text-align:center;
     }
-    h1 { margin:0 0 6px; letter-spacing:.08em; }
+    .logo { margin:0 0 6px; font-size:2rem; letter-spacing:.08em; }
     .sub { margin:0 0 24px; color:var(--muted); }
-    .hidden { display:none; }
     #googleBtn { display:flex; justify-content:center; min-height:44px; }
-    #message { margin-top:16px; font-size:.9rem; color:var(--ko); min-height:1.2em; }
-    #hello { font-size:1.2rem; font-weight:600; margin:0 0 4px; }
-    #role { color:var(--muted); margin:0 0 20px; }
-    button {
-      background:var(--btn); color:var(--btnText); border:0; border-radius:999px;
-      padding:10px 20px; font-size:1rem; cursor:pointer;
+    .message { margin-top:12px; font-size:.9rem; color:var(--ko); min-height:1.2em; }
+    .version { margin-top:24px; font-size:.8rem; color:var(--muted); }
+
+    /* Application */
+    header {
+      position:sticky; top:0; z-index:10; background:var(--card); border-bottom:1px solid var(--line);
+      padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px;
     }
-    #version { margin-top:24px; font-size:.8rem; color:var(--muted); }
+    .brand { font-weight:700; letter-spacing:.08em; }
+    .user { font-size:.85rem; color:var(--muted); }
+    .btn-secondary {
+      background:transparent; color:var(--text); border:1px solid var(--line);
+      border-radius:999px; padding:6px 14px; font-size:.9rem; cursor:pointer;
+    }
+    main { max-width:900px; margin:0 auto; padding:16px; }
+    h2 { font-size:1.2rem; margin:8px 0 16px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+    .vehicle { background:var(--card); border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+    .vehicle-top { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+    .vehicle-icon { font-size:1.6rem; }
+    .vehicle-name { font-weight:700; font-size:1.05rem; }
+    .vehicle-desc { font-size:.9rem; color:var(--muted); }
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+    .chip { background:var(--chip); border-radius:999px; padding:4px 10px; font-size:.85rem; }
+    .empty { color:var(--muted); }
+    footer { text-align:center; font-size:.8rem; color:var(--muted); padding:24px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>MOBYLYTY</h1>
-    <p class="sub">Gestion de garage</p>
 
-    <div id="viewLoading">Chargement…</div>
+  <!-- Chargement -->
+  <div id="viewLoading" class="center">
+    <div class="card">
+      <h1 class="logo">MOBYLYTY</h1>
+      <p class="sub">Chargement…</p>
+    </div>
+  </div>
 
-    <div id="viewLogin" class="hidden">
+  <!-- Connexion -->
+  <div id="viewLogin" class="center hidden">
+    <div class="card">
+      <h1 class="logo">MOBYLYTY</h1>
+      <p class="sub">Gestion de garage</p>
       <div id="googleBtn"></div>
+      <div id="loginMessage" class="message"></div>
+      <div class="version js-version"></div>
     </div>
+  </div>
 
-    <div id="viewConnected" class="hidden">
-      <p id="hello"></p>
-      <p id="role"></p>
-      <button id="logoutBtn" type="button">Se déconnecter</button>
-    </div>
-
-    <div id="message"></div>
-    <div id="version"></div>
+  <!-- Application -->
+  <div id="viewApp" class="hidden">
+    <header>
+      <div>
+        <div class="brand">MOBYLYTY</div>
+        <div id="userLabel" class="user"></div>
+      </div>
+      <button id="logoutBtn" class="btn-secondary" type="button">Se déconnecter</button>
+    </header>
+    <main>
+      <h2 id="vehiclesTitle">Mes véhicules</h2>
+      <div id="appMessage" class="message"></div>
+      <div id="vehicleList" class="grid"></div>
+    </main>
+    <footer class="js-version"></footer>
   </div>
 
   <script>
@@ -59,6 +96,11 @@
     const API_URL = 'https://script.google.com/macros/s/AKfycbxIt6yHFtICtz4fNYFtDXf1pTOVNFpTryOmaVaEJpJx3iQWsjuL67MpOUykYVk_xNDC/exec';
     const CLIENT_ID = '504887638811-f1n0jr8jtktedmv775v25vdq8m9bjdku.apps.googleusercontent.com';
     const TOKEN_KEY = 'mobylyty_token';
+
+    const CATEGORY_ICONS = {
+      voiture: '🚗', moto: '🏍️', bateau: '🚤', camion: '🚚',
+      tracteur: '🚜', velo: '🚲', 'vélo': '🚲', avion: '🛩️', utilitaire: '🚐'
+    };
 
     // ===== Appel de l'API (POST en texte brut : pas de jeton dans l'adresse) =====
     async function api(action, payload) {
@@ -70,22 +112,81 @@
       return res.json();
     }
 
-    // ===== Affichage =====
+    // ===== Affichage général =====
     function show(view) {
-      ['viewLoading', 'viewLogin', 'viewConnected'].forEach(function (id) {
+      ['viewLoading', 'viewLogin', 'viewApp'].forEach(function (id) {
         document.getElementById(id).classList.toggle('hidden', id !== view);
       });
     }
 
-    function setMessage(text) {
-      document.getElementById('message').textContent = text || '';
+    function setText(id, text) {
+      document.getElementById(id).textContent = text || '';
     }
 
-    function showConnected(user) {
-      document.getElementById('hello').textContent = 'Bonjour ' + user.name;
-      document.getElementById('role').textContent = 'Rôle : ' + (user.role || '-');
-      setMessage('');
-      show('viewConnected');
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = text;
+      return node;
+    }
+
+    // ===== Véhicules =====
+    function formatCounter(v) {
+      if (v.current_counter === null || v.current_counter === undefined) return 'Compteur non renseigné';
+      return Number(v.current_counter).toLocaleString('fr-FR') + ' ' + (v.counter_unit || '');
+    }
+
+    function renderVehicles(vehicles) {
+      const list = document.getElementById('vehicleList');
+      list.replaceChildren();
+      setText('vehiclesTitle', 'Mes véhicules (' + vehicles.length + ')');
+
+      if (vehicles.length === 0) {
+        list.appendChild(el('p', 'empty', 'Aucun véhicule accessible pour le moment.'));
+        return;
+      }
+
+      vehicles.forEach(function (v) {
+        const card = el('article', 'vehicle');
+
+        const top = el('div', 'vehicle-top');
+        top.appendChild(el('span', 'vehicle-icon', CATEGORY_ICONS[String(v.category || '').toLowerCase()] || '🚙'));
+        top.appendChild(el('span', 'vehicle-name', v.name || v.vehicle_id));
+        card.appendChild(top);
+
+        const desc = [v.make, v.model, v.version].filter(Boolean).join(' ') + (v.year ? ' · ' + v.year : '');
+        card.appendChild(el('div', 'vehicle-desc', desc));
+
+        const chips = el('div', 'chips');
+        chips.appendChild(el('span', 'chip', v.registration || 'Non immatriculé'));
+        chips.appendChild(el('span', 'chip', formatCounter(v)));
+        if (v.status && v.status !== 'active') chips.appendChild(el('span', 'chip', v.status));
+        card.appendChild(chips);
+
+        list.appendChild(card);
+      });
+    }
+
+    async function loadVehicles() {
+      setText('appMessage', '');
+      setText('vehiclesTitle', 'Mes véhicules');
+      document.getElementById('vehicleList').replaceChildren(el('p', 'empty', 'Chargement des véhicules…'));
+      try {
+        const res = await api('vehicles.list', { token: localStorage.getItem(TOKEN_KEY) });
+        if (res.ok) return renderVehicles(res.data.vehicles);
+        if (res.code === 'AUTH') return showLogin(res.error);
+        document.getElementById('vehicleList').replaceChildren();
+        setText('appMessage', res.error);
+      } catch (err) {
+        document.getElementById('vehicleList').replaceChildren();
+        setText('appMessage', 'API injoignable : ' + err.message);
+      }
+    }
+
+    function showApp(user) {
+      setText('userLabel', user.name + (user.role ? ' · ' + user.role : ''));
+      show('viewApp');
+      loadVehicles();
     }
 
     // ===== Bouton Google =====
@@ -110,7 +211,7 @@
       localStorage.removeItem(TOKEN_KEY);
       show('viewLogin');
       renderGoogleButton();
-      setMessage(message);
+      setText('loginMessage', message);
     }
 
     // ===== Connexion / déconnexion =====
@@ -120,7 +221,7 @@
         const res = await api('login', { idToken: response.credential });
         if (!res.ok) return showLogin(res.error);
         localStorage.setItem(TOKEN_KEY, res.data.token);
-        showConnected(res.data.user);
+        showApp(res.data.user);
       } catch (err) {
         showLogin('API injoignable : ' + err.message);
       }
@@ -140,14 +241,18 @@
 
       fetch(API_URL + '?action=ping')
         .then(function (r) { return r.json(); })
-        .then(function (d) { document.getElementById('version').textContent = 'Version ' + d.version; })
-        .catch(function () { document.getElementById('version').textContent = 'API injoignable'; });
+        .then(function (d) {
+          document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'Version ' + d.version; });
+        })
+        .catch(function () {
+          document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'API injoignable'; });
+        });
 
       const token = localStorage.getItem(TOKEN_KEY);
       if (!token) return showLogin('');
       try {
         const res = await api('me', { token: token });
-        if (res.ok) showConnected(res.data.user);
+        if (res.ok) showApp(res.data.user);
         else showLogin(res.code === 'AUTH' ? '' : res.error);
       } catch (err) {
         showLogin('API injoignable : ' + err.message);
