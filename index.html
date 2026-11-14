@@ -14,79 +14,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="MOBYLYTY">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <style>
-    :root { --bg:#f4f5f7; --card:#ffffff; --text:#1d1f23; --muted:#6b7280; --line:#e5e7eb; --ko:#b91c1c; --chip:#eef0f3; --accent:#c98400; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#111318; --card:#1c1f26; --text:#e8eaed; --muted:#9aa0a6; --line:#2c313a; --ko:#f87171; --chip:#2a2f38; --accent:#f0a202; }
-    }
-    * { box-sizing:border-box; }
-    body {
-      margin:0; background:var(--bg); color:var(--text);
-      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    .hidden { display:none !important; }
-    :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-
-    /* Écrans centrés : chargement et connexion */
-    .center { min-height:100vh; padding:20px; display:flex; align-items:center; justify-content:center; }
-    .card {
-      background:var(--card); border-radius:16px; padding:28px; width:100%; max-width:420px;
-      box-shadow:0 4px 20px rgba(0,0,0,.08); text-align:center;
-    }
-    .logo { margin:0 0 6px; font-size:2rem; letter-spacing:.08em; }
-    .sub { margin:0 0 24px; color:var(--muted); }
-    #googleBtn { display:flex; justify-content:center; min-height:44px; }
-    .message { margin-top:12px; font-size:.9rem; color:var(--ko); min-height:1.2em; }
-    .version { margin-top:24px; font-size:.8rem; color:var(--muted); }
-
-    /* Application */
-    header {
-      position:sticky; top:0; z-index:10; background:var(--card); border-bottom:1px solid var(--line);
-      padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px;
-    }
-    .brand { font-weight:700; letter-spacing:.08em; }
-    .user { font-size:.85rem; color:var(--muted); }
-    .btn-secondary {
-      background:transparent; color:var(--text); border:1px solid var(--line);
-      border-radius:999px; padding:6px 14px; font-size:.9rem; font-family:inherit; cursor:pointer;
-    }
-    main { max-width:900px; margin:0 auto; padding:16px; }
-    h2 { font-size:1.2rem; margin:8px 0 16px; }
-
-    /* Liste */
-    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
-    .vehicle {
-      display:block; width:100%; text-align:left; font:inherit; color:inherit; border:0; cursor:pointer;
-      background:var(--card); border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06);
-    }
-    .vehicle-top { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
-    .vehicle-icon { font-size:1.6rem; }
-    .vehicle-name { font-weight:700; font-size:1.05rem; }
-    .vehicle-desc { font-size:.9rem; color:var(--muted); }
-    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
-    .chip { background:var(--chip); border-radius:999px; padding:4px 10px; font-size:.85rem; }
-    .empty { color:var(--muted); }
-
-    /* Fiche */
-    .back { margin:4px 0 16px; }
-    .detail-head { display:flex; align-items:center; gap:12px; }
-    .detail-icon { font-size:2.2rem; }
-    .detail-name { font-size:1.4rem; margin:0; }
-    .detail-desc { color:var(--muted); margin:4px 0 16px; }
-    .section {
-      background:var(--card); border-radius:14px; padding:4px 16px 8px; margin-bottom:12px;
-      box-shadow:0 2px 10px rgba(0,0,0,.06);
-    }
-    .section h3 { font-size:1rem; margin:12px 0 4px; }
-    .section dl { margin:0; }
-    .row { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-top:1px solid var(--line); }
-    .row:first-child { border-top:0; }
-    .row dt { color:var(--muted); }
-    .row dd { margin:0; text-align:right; font-weight:500; }
-    .note { color:var(--muted); font-size:.85rem; margin:8px 0 16px; }
-
-    footer { text-align:center; font-size:.8rem; color:var(--muted); padding:24px; }
-  </style>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -118,339 +46,77 @@
       </div>
       <button id="logoutBtn" class="btn-secondary" type="button">Se déconnecter</button>
     </header>
+
     <main>
+      <!-- Liste -->
       <section id="listView">
-        <h2 id="vehiclesTitle">Mes véhicules</h2>
+        <div class="title-row">
+          <h2 id="vehiclesTitle">Mes véhicules</h2>
+          <button id="addBtn" class="btn-primary" type="button">Ajouter un véhicule</button>
+        </div>
         <div id="listMessage" class="message"></div>
         <div id="vehicleList" class="grid"></div>
       </section>
 
+      <!-- Fiche -->
       <section id="detailView" class="hidden">
-        <button id="backBtn" class="btn-secondary back" type="button">Retour à mes véhicules</button>
+        <div class="toolbar">
+          <button id="backBtn" class="btn-secondary" type="button">Retour à mes véhicules</button>
+          <button id="editBtn" class="btn-secondary hidden" type="button">Modifier</button>
+        </div>
         <div id="detailMessage" class="message"></div>
         <div id="detailContent"></div>
       </section>
+
+      <!-- Formulaire -->
+      <section id="formView" class="hidden">
+        <h2 id="formTitle">Nouveau véhicule</h2>
+        <form id="vehicleForm" novalidate>
+          <fieldset class="section">
+            <legend>Identité</legend>
+            <label>Nom<span class="req">*</span><input name="name" maxlength="80" autocomplete="off"></label>
+            <label>Catégorie<span class="req">*</span><select name="category"></select></label>
+            <label>Marque<input name="make" maxlength="60" autocomplete="off"></label>
+            <label>Modèle<input name="model" maxlength="60" autocomplete="off"></label>
+            <label>Version<input name="version" maxlength="60" autocomplete="off"></label>
+            <label>Année<input name="year" inputmode="numeric" maxlength="4" autocomplete="off"></label>
+            <label>Statut<select name="status"></select></label>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>Informations</legend>
+            <label>Immatriculation<input name="registration" maxlength="20" autocapitalize="characters" autocomplete="off"></label>
+            <label>N° de série (VIN)<input name="vin_serial" maxlength="40" autocapitalize="characters" autocomplete="off"></label>
+            <label>Date d'achat<input name="purchase_date" type="date"></label>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>Compteur</legend>
+            <label>Unité<span class="req">*</span><select name="counter_unit"></select></label>
+            <label>Compteur à l'achat<input name="purchase_counter" inputmode="decimal" autocomplete="off"></label>
+            <label id="currentCounterField">Compteur actuel<input name="current_counter" inputmode="decimal" autocomplete="off"></label>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>Finances</legend>
+            <label>Prix d'achat (€)<input name="purchase_price" inputmode="decimal" autocomplete="off"></label>
+          </fieldset>
+
+          <div id="formMessage" class="message"></div>
+          <div class="form-actions">
+            <button id="cancelBtn" class="btn-secondary" type="button">Annuler</button>
+            <button id="saveBtn" class="btn-primary" type="submit">Enregistrer</button>
+          </div>
+        </form>
+      </section>
     </main>
+
     <footer class="js-version"></footer>
   </div>
 
-  <script>
-    // ===== Configuration (ces deux valeurs ne sont pas secrètes) =====
-    const API_URL = 'https://script.google.com/macros/s/AKfycbxIt6yHFtICtz4fNYFtDXf1pTOVNFpTryOmaVaEJpJx3iQWsjuL67MpOUykYVk_xNDC/exec';
-    const CLIENT_ID = '504887638811-f1n0jr8jtktedmv775v25vdq8m9bjdku.apps.googleusercontent.com';
-    const TOKEN_KEY = 'mobylyty_token';
-    const HASH_PREFIX = '#vehicule-';
-
-    const CATEGORY_ICONS = {
-      'voiture': '🚗', 'moto': '🏍️', 'bateau': '🚤', 'remorque': '🚛',
-      'ulm___paramoteur': '🪂', '3_axes': '🛩️', 'pendulaire': '🪂', 'parapente': '🪂',
-      'ski___snow': '🎿', 'vélo': '🚲', 'trottinette': '🛴', 'agricole': '🚜',
-      'engin_de_chantier': '🚧', 'traction_animale': '🐴', 'roller': '🛼',
-      'flotteur_de_loisir': '🛟', 'foil': '🏄', 'véhicule_amphibie': '🚙', 'autre': '🚙'
-    };
-    const STATUS_LABELS = { active: 'En service', sold: 'Vendu', archived: 'Archivé' };
-    const UNIT_LABELS = { km: 'km', miles: 'miles', hours: 'h' };
-
-    let currentUser = null;
-    let openedFromList = false;
-
-    // ===== Appel de l'API (POST en texte brut : pas de jeton dans l'adresse) =====
-    async function api(action, payload) {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(Object.assign({ action: action }, payload || {}))
-      });
-      return res.json();
-    }
-
-    // ===== Outils d'affichage =====
-    function show(view) {
-      ['viewLoading', 'viewLogin', 'viewApp'].forEach(function (id) {
-        document.getElementById(id).classList.toggle('hidden', id !== view);
-      });
-    }
-
-    function setText(id, text) {
-      document.getElementById(id).textContent = text || '';
-    }
-
-    function el(tag, className, text) {
-      const node = document.createElement(tag);
-      if (className) node.className = className;
-      if (text !== undefined && text !== null) node.textContent = text;
-      return node;
-    }
-
-    function iconOf(category) {
-      return CATEGORY_ICONS[String(category || '').toLowerCase()] || '🚙';
-    }
-
-    function categoryLabel(category) {
-      if (!category) return null;
-      const s = String(category).replace(/_+/g, ' ').trim();
-      return s.charAt(0).toUpperCase() + s.slice(1);
-    }
-
-    function describe(v) {
-      return [v.make, v.model, v.version].filter(Boolean).join(' ') + (v.year ? ' · ' + v.year : '');
-    }
-
-    function formatDate(iso) {
-      if (!iso) return null;
-      const p = String(iso).slice(0, 10).split('-');
-      return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso);
-    }
-
-    function formatCounter(value, unit) {
-      if (value === null || value === undefined) return null;
-      return Number(value).toLocaleString('fr-FR') + ' ' + (UNIT_LABELS[unit] || unit || '');
-    }
-
-    function formatPrice(value) {
-      if (value === null || value === undefined) return null;
-      return Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
-    }
-
-    // ===== Liste =====
-    function renderVehicles(vehicles) {
-      const list = document.getElementById('vehicleList');
-      list.replaceChildren();
-      setText('vehiclesTitle', 'Mes véhicules (' + vehicles.length + ')');
-
-      if (vehicles.length === 0) {
-        list.appendChild(el('p', 'empty', 'Aucun véhicule accessible pour le moment.'));
-        return;
-      }
-
-      vehicles.forEach(function (v) {
-        const card = el('button', 'vehicle');
-        card.type = 'button';
-
-        const top = el('div', 'vehicle-top');
-        top.appendChild(el('span', 'vehicle-icon', iconOf(v.category)));
-        top.appendChild(el('span', 'vehicle-name', v.name || v.vehicle_id));
-        card.appendChild(top);
-        card.appendChild(el('div', 'vehicle-desc', describe(v)));
-
-        const chips = el('div', 'chips');
-        if ('registration' in v) chips.appendChild(el('span', 'chip', v.registration || 'Non immatriculé'));
-        if ('current_counter' in v) chips.appendChild(el('span', 'chip', formatCounter(v.current_counter, v.counter_unit) || 'Compteur non renseigné'));
-        if (v.status && v.status !== 'active') chips.appendChild(el('span', 'chip', STATUS_LABELS[v.status] || v.status));
-        if (chips.childNodes.length) card.appendChild(chips);
-
-        card.addEventListener('click', function () { openVehicle(v.vehicle_id); });
-        list.appendChild(card);
-      });
-    }
-
-    async function showList() {
-      document.getElementById('detailView').classList.add('hidden');
-      document.getElementById('listView').classList.remove('hidden');
-      setText('listMessage', '');
-      setText('vehiclesTitle', 'Mes véhicules');
-      document.getElementById('vehicleList').replaceChildren(el('p', 'empty', 'Chargement des véhicules…'));
-      try {
-        const res = await api('vehicles.list', { token: localStorage.getItem(TOKEN_KEY) });
-        if (res.ok) return renderVehicles(res.data.vehicles);
-        if (res.code === 'AUTH') return showLogin(res.error);
-        document.getElementById('vehicleList').replaceChildren();
-        setText('listMessage', res.error);
-      } catch (err) {
-        document.getElementById('vehicleList').replaceChildren();
-        setText('listMessage', 'API injoignable : ' + err.message);
-      }
-    }
-
-    // ===== Fiche =====
-    function section(title, rows) {
-      const s = el('section', 'section');
-      s.appendChild(el('h3', null, title));
-      const dl = el('dl');
-      rows.forEach(function (r) {
-        const row = el('div', 'row');
-        row.appendChild(el('dt', null, r[0]));
-        const empty = r[1] === null || r[1] === undefined || r[1] === '';
-        row.appendChild(el('dd', null, empty ? 'Non renseigné' : r[1]));
-        dl.appendChild(row);
-      });
-      s.appendChild(dl);
-      return s;
-    }
-
-    function renderDetail(v) {
-      const box = document.getElementById('detailContent');
-      box.replaceChildren();
-
-      const head = el('div', 'detail-head');
-      head.appendChild(el('span', 'detail-icon', iconOf(v.category)));
-      head.appendChild(el('h2', 'detail-name', v.name || v.vehicle_id));
-      box.appendChild(head);
-      box.appendChild(el('p', 'detail-desc', describe(v)));
-
-      box.appendChild(section('Identité', [
-        ['Catégorie', categoryLabel(v.category)],
-        ['Marque', v.make],
-        ['Modèle', v.model],
-        ['Version', v.version],
-        ['Année', v.year],
-        ['Statut', STATUS_LABELS[v.status] || v.status]
-      ]));
-
-      if ('registration' in v) {
-        box.appendChild(section('Informations', [
-          ['Immatriculation', v.registration],
-          ['N° de série (VIN)', v.vin_serial],
-          ["Date d'achat", formatDate(v.purchase_date)],
-          ['Propriétaire', v.owner_name]
-        ]));
-      }
-
-      if ('current_counter' in v) {
-        box.appendChild(section('Compteur', [
-          ['Compteur actuel', formatCounter(v.current_counter, v.counter_unit)],
-          ['Dernier relevé', formatDate(v.counter_reading_date)],
-          ["Compteur à l'achat", formatCounter(v.purchase_counter, v.counter_unit)]
-        ]));
-      }
-
-      if ('purchase_price' in v) {
-        box.appendChild(section('Finances', [
-          ["Prix d'achat", formatPrice(v.purchase_price)]
-        ]));
-      }
-
-      if (v.hidden_topics && v.hidden_topics.length) {
-        box.appendChild(el('p', 'note', 'Certaines informations de ce véhicule ne sont pas partagées avec toi.'));
-      }
-    }
-
-    async function showDetail(vehicleId) {
-      document.getElementById('listView').classList.add('hidden');
-      document.getElementById('detailView').classList.remove('hidden');
-      window.scrollTo(0, 0);
-      setText('detailMessage', '');
-      const box = document.getElementById('detailContent');
-      box.replaceChildren(el('p', 'empty', 'Chargement de la fiche…'));
-      try {
-        const res = await api('vehicles.get', { token: localStorage.getItem(TOKEN_KEY), vehicleId: vehicleId });
-        if (res.ok) return renderDetail(res.data.vehicle);
-        if (res.code === 'AUTH') return showLogin(res.error);
-        box.replaceChildren();
-        setText('detailMessage', res.error);
-      } catch (err) {
-        box.replaceChildren();
-        setText('detailMessage', 'API injoignable : ' + err.message);
-      }
-    }
-
-    // ===== Navigation (le bouton retour du téléphone fonctionne) =====
-    function openVehicle(vehicleId) {
-      openedFromList = true;
-      location.hash = HASH_PREFIX + encodeURIComponent(vehicleId);
-    }
-
-    function backToList() {
-      if (openedFromList) {
-        openedFromList = false;
-        history.back();
-      } else {
-        location.hash = '';
-      }
-    }
-
-    function route() {
-      if (!currentUser) return;
-      const h = location.hash;
-      if (h.indexOf(HASH_PREFIX) === 0) showDetail(decodeURIComponent(h.slice(HASH_PREFIX.length)));
-      else showList();
-    }
-
-    function showApp(user) {
-      currentUser = user;
-      setText('userLabel', user.name + (user.role ? ' · ' + user.role : ''));
-      show('viewApp');
-      route();
-    }
-
-    // ===== Bouton Google =====
-    let gisReady = false;
-    let wantButton = false;
-
-    function onGisLoad() {
-      google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onGoogleCredential });
-      gisReady = true;
-      if (wantButton) renderGoogleButton();
-    }
-
-    function renderGoogleButton() {
-      wantButton = true;
-      if (!gisReady) return;
-      google.accounts.id.renderButton(document.getElementById('googleBtn'), {
-        theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'fr'
-      });
-    }
-
-    function showLogin(message) {
-      currentUser = null;
-      localStorage.removeItem(TOKEN_KEY);
-      if (location.hash) history.replaceState(null, '', location.pathname + location.search);
-      show('viewLogin');
-      renderGoogleButton();
-      setText('loginMessage', message);
-    }
-
-    // ===== Connexion / déconnexion =====
-    async function onGoogleCredential(response) {
-      show('viewLoading');
-      try {
-        const res = await api('login', { idToken: response.credential });
-        if (!res.ok) return showLogin(res.error);
-        localStorage.setItem(TOKEN_KEY, res.data.token);
-        showApp(res.data.user);
-      } catch (err) {
-        showLogin('API injoignable : ' + err.message);
-      }
-    }
-
-    async function logout() {
-      const token = localStorage.getItem(TOKEN_KEY);
-      show('viewLoading');
-      try { await api('logout', { token: token }); } catch (err) { /* la session locale est supprimée quoi qu'il arrive */ }
-      if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
-      showLogin('');
-    }
-
-    // ===== Démarrage =====
-    async function start() {
-      document.getElementById('logoutBtn').addEventListener('click', logout);
-      document.getElementById('backBtn').addEventListener('click', backToList);
-      window.addEventListener('hashchange', route);
-
-      fetch(API_URL + '?action=ping')
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'Version ' + d.version; });
-        })
-        .catch(function () {
-          document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'API injoignable'; });
-        });
-
-      const token = localStorage.getItem(TOKEN_KEY);
-      if (!token) return showLogin('');
-      try {
-        const res = await api('me', { token: token });
-        if (res.ok) showApp(res.data.user);
-        else showLogin(res.code === 'AUTH' ? '' : res.error);
-      } catch (err) {
-        showLogin('API injoignable : ' + err.message);
-      }
-    }
-
-    start();
-  </script>
-
-  <!-- Bibliothèque officielle Google, chargée après notre script -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <!-- Bibliothèque officielle Google, chargée après nos scripts -->
   <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
 </body>
 </html>
