@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MOBYLYTY</title>
+  <style>
+    :root { --bg:#f4f5f7; --card:#ffffff; --text:#1d1f23; --muted:#6b7280; --ok:#15803d; --ko:#b91c1c; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#111318; --card:#1c1f26; --text:#e8eaed; --muted:#9aa0a6; --ok:#4ade80; --ko:#f87171; }
+    }
+    body {
+      margin:0; min-height:100vh; padding:20px; box-sizing:border-box;
+      display:flex; align-items:center; justify-content:center;
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background:var(--bg); color:var(--text);
+    }
+    .card {
+      background:var(--card); border-radius:16px; padding:28px; width:100%; max-width:420px;
+      box-shadow:0 4px 20px rgba(0,0,0,.08); text-align:center;
+    }
+    h1 { margin:0 0 6px; letter-spacing:.08em; }
+    .sub { margin:0 0 24px; color:var(--muted); }
+    #status { font-weight:600; }
+    #detail { margin-top:8px; font-size:.9rem; color:var(--muted); }
+    .ok { color:var(--ok); }
+    .ko { color:var(--ko); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>MOBYLYTY</h1>
+    <p class="sub">Gestion de garage</p>
+    <div id="status">Connexion à l'API…</div>
+    <div id="detail"></div>
+  </div>
+
+  <script>
+    // Adresse de l'API Apps Script : URL du déploiement, se termine par /exec
+    const API_URL = 'https://script.google.com/macros/s/AKfycbxIt6yHFtICtz4fNYFtDXf1pTOVNFpTryOmaVaEJpJx3iQWsjuL67MpOUykYVk_xNDC/exec';
+
+    async function ping() {
+      const status = document.getElementById('status');
+      const detail = document.getElementById('detail');
+      try {
+        const res = await fetch(API_URL + '?action=ping');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Réponse inattendue');
+        status.textContent = '✅ API en ligne';
+        status.className = 'ok';
+        detail.textContent = 'Version ' + data.version;
+      } catch (err) {
+        status.textContent = '❌ API injoignable';
+        status.className = 'ko';
+        detail.textContent = err.message;
+      }
+    }
+
+    ping();
+  </script>
+</body>
+</html>
