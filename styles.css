@@ -96,3 +96,22 @@ footer { text-align:center; font-size:.8rem; color:var(--muted); padding:24px; }
   font-family:inherit; font-size:.95rem; cursor:pointer;
 }
 .btn-danger:disabled { opacity:.5; cursor:default; }
+
+/* Modules */
+.actions { display:flex; gap:8px; flex-wrap:wrap; }
+.section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.section-head h3 { margin:12px 0; }
+.btn-small { padding:4px 12px; font-size:.85rem; }
+.btn-link { background:none; border:0; color:var(--ko); font-family:inherit; font-size:.85rem; cursor:pointer; padding:10px 0 0; }
+.icon-btn { background:none; border:0; color:var(--muted); font-size:1.2rem; line-height:1; cursor:pointer; padding:0 4px; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.hint { margin:6px 0 0; font-size:.85rem; color:var(--muted); min-height:1em; }
+.total { text-align:right; font-weight:600; margin:4px 0; }
+.add-line { display:block; width:100%; margin:0 0 12px; }
+
+/* Carburant */
+.fuel-list { list-style:none; margin:8px 0 0; padding:0; }
+.fuel-item { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+.fuel-main { font-weight:500; }
+.fuel-sub { font-size:.85rem; color:var(--muted); margin-top:2px; }
+.more { margin-top:8px; }
