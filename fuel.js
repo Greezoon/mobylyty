@@ -1,303 +1,217 @@
-/* MOBYLYTY : module Carburant (saisie des pleins et section Carburant de la fiche). */
+/* MOBYLYTY : carburant (onglet de la fiche et saisie d'un plein, éventuellement multi-véhicules). */
+'use strict';
 (function () {
-  const ROUTE = '#nouveau-plein';
-  const SHOWN = 10; // pleins affichés avant « Afficher tout »
-  const fuelCache = {};
-  let formVehicleId = null;
+  const SHOWN = 8;
 
-  function fmt(n, d) { return formatNumber(n, d === undefined ? 2 : d); }
   function pricePerLiter(n) {
     return Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' €/L';
   }
-  function invalidate(vehicleId) {
-    delete fuelCache[vehicleId];
-    delete cache.at['fuel:' + vehicleId];
-    delete cache.at['detail:' + vehicleId];
-    delete cache.at.list;
-  }
-  function fuelableVehicles() {
-    return (cache.vehicles || []).filter(function (v) { return v.can_add_fuel && (!v.status || v.status === 'active'); });
-  }
+  function fuelable() { return activeVehicles().filter(function (v) { return v.can_add_fuel; }); }
 
-  // ===== Page de saisie (créée une seule fois) =====
-  const panel = el('section', 'hidden');
-  panel.id = 'fuelView';
-  panel.innerHTML =
-    '<h2>Nouveau plein</h2>' +
-    '<form id="fuelForm" novalidate>' +
-    '  <fieldset class="section">' +
-    '    <legend>Passage à la station</legend>' +
-    '    <label>Date<span class="req">*</span><input name="date" type="date"></label>' +
-    '    <label>Station<input name="station" maxlength="80" autocomplete="off" placeholder="Ex. Total, Leclerc…"></label>' +
-    '    <label>Lieu<input name="location" maxlength="80" autocomplete="off"></label>' +
-    '    <label>Commentaire<input name="comment" maxlength="500" autocomplete="off"></label>' +
-    '  </fieldset>' +
-    '  <div id="fuelLines"></div>' +
-    '  <button id="fuelAddLine" class="btn-secondary add-line" type="button">+ Ajouter un véhicule à ce plein</button>' +
-    '  <p id="fuelTotal" class="total"></p>' +
-    '  <div id="fuelMessage" class="message"></div>' +
-    '  <div class="form-actions">' +
-    '    <button id="fuelCancel" class="btn-secondary" type="button">Annuler</button>' +
-    '    <button class="btn-primary" type="submit">Enregistrer le plein</button>' +
-    '  </div>' +
-    '</form>';
-  document.querySelector('main').appendChild(panel);
-
-  const listBtn = el('button', 'btn-secondary hidden', 'Nouveau plein');
-  listBtn.type = 'button';
-  listBtn.addEventListener('click', function () { go(ROUTE); });
-  $('listActions').appendChild(listBtn);
-
-  function addLine(vehicleId) {
-    const vehicles = fuelableVehicles();
-    const line = el('fieldset', 'section fuel-line');
-    line.innerHTML =
-      '<legend>Véhicule</legend>' +
-      '<label>Véhicule<span class="req">*</span><select data-f="vehicle_id"></select></label>' +
-      '<label>Carburant<select data-f="fuel_type"></select></label>' +
-      '<div class="two">' +
-      '  <label>Litres<span class="req">*</span><input data-f="liters" inputmode="decimal" autocomplete="off"></label>' +
-      '  <label>Montant (€)<span class="req">*</span><input data-f="amount" inputmode="decimal" autocomplete="off"></label>' +
-      '</div>' +
-      '<label data-counter>Compteur (facultatif)<input data-f="counter" inputmode="decimal" autocomplete="off"></label>' +
-      '<p class="hint"></p>' +
-      '<button class="btn-link" type="button" data-remove>Retirer ce véhicule</button>';
-
-    const f = function (name) { return line.querySelector('[data-f="' + name + '"]'); };
-    vehicles.forEach(function (v) { f('vehicle_id').appendChild(new Option(v.name || v.vehicle_id, v.vehicle_id)); });
-    fillSelect(f('fuel_type'), 'fuel_type', '—');
-    if (vehicleId) f('vehicle_id').value = vehicleId;
-
-    function onVehicleChange() {
-      const v = vehicles.find(function (x) { return x.vehicle_id === f('vehicle_id').value; });
-      const canCounter = !!(v && v.can_update_counter);
-      line.querySelector('[data-counter]').classList.toggle('hidden', !canCounter);
-      f('counter').value = '';
-      f('counter').placeholder = (v && v.current_counter !== null && v.current_counter !== undefined)
-        ? 'Actuel : ' + formatCounter(v.current_counter, v.counter_unit) : '';
-      const known = v && fuelCache[v.vehicle_id];
-      const last = known && known.fuel.find(function (x) { return x.fuel_type; });
-      f('fuel_type').value = last ? last.fuel_type : '';
-    }
-    function onAmounts() {
-      const liters = parseNumber(f('liters').value);
-      const amount = parseNumber(f('amount').value);
-      line.querySelector('.hint').textContent = (liters > 0 && amount >= 0) ? pricePerLiter(amount / liters) : '';
-      updateTotal();
-    }
-
-    f('vehicle_id').addEventListener('change', onVehicleChange);
-    f('liters').addEventListener('input', onAmounts);
-    f('amount').addEventListener('input', onAmounts);
-    line.querySelector('[data-remove]').addEventListener('click', function () { line.remove(); refreshLines(); });
-
-    $('fuelLines').appendChild(line);
-    onVehicleChange();
-    refreshLines();
-  }
-
-  function refreshLines() {
-    const lines = $('fuelLines').querySelectorAll('.fuel-line');
-    lines.forEach(function (l, i) {
-      l.querySelector('legend').textContent = 'Véhicule ' + (i + 1);
-      l.querySelector('[data-remove]').classList.toggle('hidden', lines.length === 1);
-    });
-    $('fuelAddLine').classList.toggle('hidden', lines.length >= fuelableVehicles().length);
-    updateTotal();
-  }
-
-  function updateTotal() {
-    let liters = 0;
-    let amount = 0;
-    $('fuelLines').querySelectorAll('.fuel-line').forEach(function (l) {
-      liters += parseNumber(l.querySelector('[data-f="liters"]').value) || 0;
-      amount += parseNumber(l.querySelector('[data-f="amount"]').value) || 0;
-    });
-    setText('fuelTotal', liters || amount ? 'Total : ' + fmt(liters) + ' L · ' + formatPrice(amount) : '');
-  }
-
-  function showFuelForm(vehicleId) {
-    showPanel('fuelView');
-    formVehicleId = vehicleId;
-    const form = $('fuelForm');
-    form.reset();
-    setText('fuelMessage', '');
-    $('fuelLines').replaceChildren();
-    form.elements['date'].value = todayIso();
-    if (!fuelableVehicles().length) {
-      setText('fuelMessage', "Aucun véhicule pour lequel tu peux saisir un plein.");
-      return;
-    }
-    addLine(vehicleId);
-  }
-
-  async function submitFuel(e) {
-    e.preventDefault();
-    const form = $('fuelForm');
-    const lines = [];
-    $('fuelLines').querySelectorAll('.fuel-line').forEach(function (l) {
-      const get = function (n) { return l.querySelector('[data-f="' + n + '"]').value.trim(); };
-      const withCounter = !l.querySelector('[data-counter]').classList.contains('hidden');
-      lines.push({
-        vehicle_id: get('vehicle_id'), fuel_type: get('fuel_type'),
-        liters: get('liters'), amount: get('amount'), counter: withCounter ? get('counter') : ''
+  // ===== Onglet Carburant =====
+  addTab({
+    slug: 'carburant', label: 'Carburant', order: 20,
+    visible: function (v) { return v.can_add_fuel; },
+    render: function (box, v) {
+      const bar = el('div', 'toolbar');
+      bar.appendChild(el('p', null, 'Pleins et consommation'));
+      bar.appendChild(button('Ajouter un plein', 'btn btn-primary btn-small', function () { go(link('plein', v.vehicle_id)); }));
+      box.appendChild(bar);
+      const body = el('div');
+      box.appendChild(body);
+      const key = 'fuel:' + v.vehicle_id;
+      load(key, function () { return api('fuel.list', { vehicleId: v.vehicle_id }); }, function (data) {
+        renderFuel(body, v, data);
+      }, {
+        loading: function () { body.replaceChildren(skeleton(2)); },
+        error: function (msg, had) { if (!had) body.replaceChildren(errorBox(msg)); },
+        stillHere: function () { return body.isConnected; }
       });
-    });
-
-    const buttons = form.querySelectorAll('button, input, select');
-    buttons.forEach(function (b) { b.disabled = true; });
-    setText('fuelMessage', '');
-    try {
-      const res = await api('fuel.create', { fuel: {
-        date: form.elements['date'].value, station: form.elements['station'].value,
-        location: form.elements['location'].value, comment: form.elements['comment'].value, lines: lines
-      } });
-      if (res.ok) {
-        lines.forEach(function (l) { invalidate(l.vehicle_id); });
-        return goBack(formVehicleId ? ROUTES.detail + encodeURIComponent(formVehicleId) : '');
-      }
-      handleError(res, 'fuelMessage');
-    } catch (err) {
-      setText('fuelMessage', 'Connexion impossible : ' + err.message);
-    } finally {
-      buttons.forEach(function (b) { b.disabled = false; });
     }
-  }
-
-  $('fuelForm').addEventListener('submit', submitFuel);
-  $('fuelAddLine').addEventListener('click', function () {
-    const used = Array.from($('fuelLines').querySelectorAll('[data-f="vehicle_id"]')).map(function (s) { return s.value; });
-    const next = fuelableVehicles().find(function (v) { return used.indexOf(v.vehicle_id) === -1; });
-    addLine(next ? next.vehicle_id : null);
-  });
-  $('fuelCancel').addEventListener('click', function () {
-    goBack(formVehicleId ? ROUTES.detail + encodeURIComponent(formVehicleId) : '');
   });
 
-  // ===== Section Carburant de la fiche =====
-  function renderFuel(v, body, data) {
+  function renderFuel(body, v, data) {
     body.replaceChildren();
     const s = data.stats;
     if (!s.count) {
-      body.appendChild(el('p', 'empty', 'Aucun plein pour le moment.'));
+      body.appendChild(emptyState('Aucun plein pour le moment.', 'Ajouter un plein', function () { go(link('plein', v.vehicle_id)); }));
       return;
     }
-
     const rows = [
       ['Pleins', String(s.count)],
-      ['Total', fmt(s.total_liters) + ' L · ' + formatPrice(s.total_amount)],
+      ['Total', fmtNum(s.total_liters) + ' L pour ' + fmtMoney(s.total_amount)],
       ['Prix moyen', s.avg_price_per_liter ? pricePerLiter(s.avg_price_per_liter) : null]
     ];
-    if (s.consumption) {
-      rows.push(['Consommation moyenne', fmt(s.consumption) + ' ' + s.consumption_unit + ' (sur ' + formatCounter(s.distance, v.counter_unit) + ')']);
-    }
-    const dl = el('dl');
-    rows.forEach(function (r) {
-      const row = el('div', 'row');
-      row.appendChild(el('dt', null, r[0]));
-      row.appendChild(el('dd', null, r[1] || 'Non renseigné'));
-      dl.appendChild(row);
-    });
-    body.appendChild(dl);
+    if (s.consumption) rows.push(['Consommation', fmtNum(s.consumption) + ' ' + s.consumption_unit]);
+    if (s.distance) rows.push(['Mesurée sur', fmtCounter(s.distance, v.counter_unit)]);
+    body.appendChild(logbook(null, rows));
 
-    const ul = el('ul', 'fuel-list');
+    const list = el('div', 'items');
     data.fuel.forEach(function (f, i) {
-      const li = el('li', 'fuel-item' + (i >= SHOWN ? ' hidden' : ''));
-      const text = el('div');
-      text.appendChild(el('div', 'fuel-main', formatDate(f.date) + ' · ' + fmt(f.liters) + ' L · ' + formatPrice(f.amount)));
+      const item = el('div', 'item' + (i >= SHOWN ? ' hidden' : ''));
+      item.appendChild(el('span', 'item-title', fmtDateLong(f.date) + ', ' + fmtNum(f.liters) + ' L'));
+      item.appendChild(el('span', 'item-amount', fmtMoney(f.amount)));
       const sub = [labelOf('fuel_type', f.fuel_type), f.price_per_liter ? pricePerLiter(f.price_per_liter) : null, f.station];
-      if (f.counter !== null && f.counter !== undefined && f.counter !== '') {
-        let c = 'à ' + formatCounter(f.counter, v.counter_unit);
-        if (f.distance_since_previous !== null && f.distance_since_previous !== undefined && f.distance_since_previous !== '') {
-          c += ' (+' + formatCounter(f.distance_since_previous, v.counter_unit) + ')';
-        }
-        sub.push(c);
+      if (!isEmpty(f.counter)) {
+        sub.push('à ' + fmtCounter(f.counter, v.counter_unit) + (isEmpty(f.distance_since_previous) ? '' : ' (+' + fmtCounter(f.distance_since_previous, v.counter_unit) + ')'));
       }
-      text.appendChild(el('div', 'fuel-sub', sub.filter(Boolean).join(' · ')));
-      li.appendChild(text);
-
+      item.appendChild(el('span', 'item-sub', sub.filter(Boolean).join(', ')));
       if (data.can_delete) {
-        const del = el('button', 'icon-btn', '×');
-        del.type = 'button';
-        del.setAttribute('aria-label', 'Supprimer ce plein');
-        del.addEventListener('click', function () { deleteFuel(v, body, f); });
-        li.appendChild(del);
+        const actions = el('div', 'row-actions');
+        actions.appendChild(button('Supprimer', 'btn btn-ghost btn-small', async function () {
+          const ok = await confirmDialog('Supprimer ce plein ?', fmtDateLong(f.date) + ', ' + fmtNum(f.liters) + ' L pour ' + fmtMoney(f.amount) + '.\nLe compteur du véhicule ne sera pas modifié.');
+          if (!ok) return;
+          const res = await send('fuel.delete', { fuelId: f.fuel_id }, toast);
+          if (!res) return;
+          forgetVehicle(v.vehicle_id);
+          toast('Plein supprimé');
+          route();
+        }));
+        item.appendChild(actions);
       }
-      ul.appendChild(li);
+      list.appendChild(item);
     });
-    body.appendChild(ul);
-
+    body.appendChild(list);
     if (data.fuel.length > SHOWN) {
-      const more = el('button', 'btn-secondary btn-small more', 'Afficher les ' + data.fuel.length + ' pleins');
-      more.type = 'button';
-      more.addEventListener('click', function () {
-        ul.querySelectorAll('.hidden').forEach(function (x) { x.classList.remove('hidden'); });
+      const more = button('Afficher les ' + data.fuel.length + ' pleins', 'btn btn-ghost btn-small toggle-more', function () {
+        list.querySelectorAll('.hidden').forEach(function (x) { x.classList.remove('hidden'); });
         more.remove();
       });
       body.appendChild(more);
     }
   }
 
-  async function loadFuel(v, body) {
-    const key = 'fuel:' + v.vehicle_id;
-    const cached = fuelCache[v.vehicle_id];
-    if (cached) renderFuel(v, body, cached);
-    else body.replaceChildren(el('p', 'empty', 'Chargement des pleins…'));
-    if (cached && isFresh(key)) return;
+  // ===== Saisie d'un plein =====
+  addRoute('plein', function (parts) { showFuelForm(parts[0] || null); });
 
-    try {
-      const res = await api('fuel.list', { vehicleId: v.vehicle_id });
-      if (!res.ok) {
-        if (res.code === 'AUTH') return showLogin(res.error);
-        return body.replaceChildren(el('p', 'message', res.error));
-      }
-      const changed = !sameData(cached, res.data);
-      fuelCache[v.vehicle_id] = remember(key, res.data);
-      if (changed && body.isConnected) renderFuel(v, body, res.data);
-    } catch (err) {
-      if (!cached) body.replaceChildren(el('p', 'message', 'Connexion impossible : ' + err.message));
-    }
-  }
-
-  async function deleteFuel(v, body, f) {
-    const label = formatDate(f.date) + ' (' + fmt(f.liters) + ' L, ' + formatPrice(f.amount) + ')';
-    if (!confirm('Supprimer le plein du ' + label + ' ?\n\nCette action est irréversible.')) return;
-    try {
-      const res = await api('fuel.delete', { fuelId: f.fuel_id });
-      if (!res.ok) return alert(res.error);
-      invalidate(v.vehicle_id);
-      loadFuel(v, body);
-    } catch (err) {
-      alert('Connexion impossible : ' + err.message);
-    }
-  }
-
-  registerModule({
-    route: function (h) {
-      if (h !== ROUTE && h.indexOf(ROUTE + '-') !== 0) return false;
-      showFuelForm(h.length > ROUTE.length ? decodeURIComponent(h.slice(ROUTE.length + 1)) : null);
-      return true;
-    },
-    detail: function (v, box) {
-      if (!v.can_add_fuel) return;
-      const s = el('section', 'section');
-      const head = el('div', 'section-head');
-      head.appendChild(el('h3', null, 'Carburant'));
-      const add = el('button', 'btn-secondary btn-small', 'Ajouter un plein');
-      add.type = 'button';
-      add.addEventListener('click', function () { go(ROUTE + '-' + encodeURIComponent(v.vehicle_id)); });
-      head.appendChild(add);
-      s.appendChild(head);
-      const body = el('div');
-      s.appendChild(body);
-      box.appendChild(s);
-      loadFuel(v, body);
-    },
-    onVehicles: function (vehicles) {
-      listBtn.classList.toggle('hidden', !vehicles.some(function (v) { return v.can_add_fuel; }));
-    },
-    clear: function () {
-      Object.keys(fuelCache).forEach(function (k) { delete fuelCache[k]; });
+  addQuickAction({
+    order: 10, icon: '⛽', label: 'Nouveau plein', hint: 'Un ou plusieurs véhicules', needsVehicle: false,
+    run: function (ctxId) {
+      const ok = ctxId && fuelable().some(function (v) { return v.vehicle_id === ctxId; });
+      go(link('plein', ok ? ctxId : null));
     }
   });
+
+  function showFuelForm(vehicleId) {
+    const view = mountView(vehicleId ? 'garage' : 'home');
+    const back = function () { goBack(vehicleId ? link('v', vehicleId, 'carburant') : link()); };
+    view.appendChild(backLink(vehicleId ? 'Fiche' : 'Accueil', back));
+    view.appendChild(el('h1', 'page-title', 'Nouveau plein'));
+    const vehicles = fuelable();
+    if (!vehicles.length) { view.appendChild(errorBox("Aucun véhicule pour lequel tu peux saisir un plein.")); return; }
+
+    const station = buildForm([
+      { section: 'Passage à la station' },
+      { name: 'date', label: 'Date', kind: 'date', required: true, defaultToday: true },
+      { name: 'station', label: 'Station', kind: 'text', max: 80, placeholder: 'Ex. Total, Leclerc' },
+      { name: 'location', label: 'Lieu', kind: 'text', max: 80 }
+    ], {}, { isCreate: true, asPart: true });
+    station.node.querySelector('.form-message').remove();
+    const lines = el('div');
+    const addBtn = button('Ajouter un autre véhicule à ce plein', 'btn btn-ghost btn-block', function () {
+      const used = currentLines().map(function (l) { return l.select.value; });
+      const next = vehicles.find(function (v) { return used.indexOf(v.vehicle_id) === -1; });
+      addLine(next ? next.vehicle_id : vehicles[0].vehicle_id);
+    });
+    const total = el('p', 'total-line');
+    const message = el('p', 'form-message');
+    const form = el('form', 'form');
+    form.noValidate = true;
+    form.append(station.node, lines, addBtn, total, message, formActions('Enregistrer le plein', back));
+    view.appendChild(form);
+
+    const lineObjects = [];
+    function currentLines() { return lineObjects.filter(function (l) { return l.node.isConnected; }); }
+
+    function addLine(vid) {
+      const node = el('div', 'fieldset');
+      const title = el('h3');
+      node.appendChild(title);
+      const sel = el('select');
+      vehicles.forEach(function (v) { sel.appendChild(new Option(v.name || v.vehicle_id, v.vehicle_id)); });
+      sel.value = vid;
+      const fuelSel = el('select');
+      fuelSel.appendChild(new Option('—', ''));
+      (state.lists.fuel_type || []).forEach(function (i) { fuelSel.appendChild(new Option(i.label, i.key)); });
+      function field(label, input, required) {
+        const w = el('label', 'field');
+        const s = el('span', null, label);
+        if (required) s.appendChild(el('b', 'req', ' *'));
+        w.append(s, input);
+        return w;
+      }
+      function numInput(mode) { const i = el('input'); i.inputMode = mode || 'decimal'; i.autocomplete = 'off'; return i; }
+      const liters = numInput();
+      const amount = numInput();
+      const counter = numInput();
+      const two = el('div', 'two');
+      two.append(field('Litres', liters, true), field('Montant (€)', amount, true));
+      const counterField = field('Compteur (facultatif)', counter);
+      const hint = el('p', 'hint');
+      const remove = button('Retirer ce véhicule', 'btn btn-ghost btn-small', function () { node.remove(); refresh(); });
+      node.append(field('Véhicule', sel, true), field('Carburant', fuelSel), two, counterField, hint, remove);
+
+      const line = { node: node, select: sel, fuel: fuelSel, liters: liters, amount: amount, counter: counter, counterField: counterField, title: title, remove: remove };
+      function onVehicle() {
+        const v = vehicles.find(function (x) { return x.vehicle_id === sel.value; });
+        counterField.classList.toggle('hidden', !(v && v.can_update_counter));
+        counter.value = '';
+        counter.placeholder = (v && !isEmpty(v.current_counter)) ? 'Actuel : ' + fmtCounter(v.current_counter, v.counter_unit) : '';
+        const known = cached('fuel:' + sel.value);
+        const last = known && known.fuel.find(function (x) { return x.fuel_type; });
+        fuelSel.value = last ? last.fuel_type : '';
+      }
+      function onAmounts() {
+        const l = parseNum(liters.value);
+        const a = parseNum(amount.value);
+        hint.textContent = (l > 0 && a >= 0) ? pricePerLiter(a / l) : '';
+        refresh();
+      }
+      sel.addEventListener('change', onVehicle);
+      liters.addEventListener('input', onAmounts);
+      amount.addEventListener('input', onAmounts);
+      lineObjects.push(line);
+      lines.appendChild(node);
+      onVehicle();
+      refresh();
+    }
+
+    function refresh() {
+      const list = currentLines();
+      let l = 0, a = 0;
+      list.forEach(function (line, i) {
+        line.title.textContent = list.length > 1 ? 'Véhicule ' + (i + 1) : 'Véhicule';
+        line.remove.classList.toggle('hidden', list.length === 1);
+        l += parseNum(line.liters.value) || 0;
+        a += parseNum(line.amount.value) || 0;
+      });
+      addBtn.classList.toggle('hidden', list.length >= vehicles.length);
+      total.textContent = (l || a) ? 'Total : ' + fmtNum(l) + ' L, ' + fmtMoney(a) : '';
+    }
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const head = station.read();
+      if (!head) { message.textContent = 'La date est obligatoire.'; return; }
+      const payloadLines = currentLines().map(function (line) {
+        return {
+          vehicle_id: line.select.value, fuel_type: line.fuel.value,
+          liters: line.liters.value.trim(), amount: line.amount.value.trim(),
+          counter: line.counterField.classList.contains('hidden') ? '' : line.counter.value.trim()
+        };
+      });
+      const missing = payloadLines.find(function (l) { return !l.liters || !l.amount; });
+      if (missing) { message.textContent = 'Indique les litres et le montant pour chaque véhicule.'; return; }
+      message.textContent = '';
+      form.querySelectorAll('input, select, button').forEach(function (x) { x.disabled = true; });
+      const data = await send('fuel.create', { fuel: Object.assign({}, head, { lines: payloadLines }) }, function (m) { message.textContent = m; });
+      form.querySelectorAll('input, select, button').forEach(function (x) { x.disabled = false; });
+      if (!data) return;
+      payloadLines.forEach(function (l) { forgetVehicle(l.vehicle_id); });
+      toast(payloadLines.length > 1 ? 'Plein enregistré pour ' + payloadLines.length + ' véhicules' : 'Plein enregistré');
+      back();
+    });
+
+    addLine(vehicleId && vehicles.some(function (v) { return v.vehicle_id === vehicleId; }) ? vehicleId : vehicles[0].vehicle_id);
+  }
 })();

@@ -1,7 +1,10 @@
-/* MOBYLYTY : fonctionnement de l'application. La configuration est dans config.js. */
+/* MOBYLYTY : cœur de l'appli (API, mémoire, navigation, composants communs). Configuration : config.js */
+'use strict';
+
 const TOKEN_KEY = 'mobylyty_token';
-const ROUTES = { detail: '#vehicule-', edit: '#modifier-', create: '#nouveau-vehicule' };
-const FRESH_MS = 30000; // en dessous de 30 s, une donnée en mémoire n'est pas redemandée
+const FRESH_MS = 30000; // une donnée vue il y a moins de 30 s n'est pas redemandée
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const CATEGORY_ICONS = {
   'voiture': '🚗', 'moto': '🏍️', 'bateau': '🚤', 'remorque': '🚛',
   'ulm___paramoteur': '🪂', '3_axes': '🛩️', 'pendulaire': '🪂', 'parapente': '🪂',
@@ -9,35 +12,15 @@ const CATEGORY_ICONS = {
   'engin_de_chantier': '🚧', 'traction_animale': '🐴', 'roller': '🛼',
   'flotteur_de_loisir': '🛟', 'foil': '🏄', 'véhicule_amphibie': '🚙', 'autre': '🚙'
 };
+const HISTORY_ICONS = {
+  purchase: '🔑', fuel: '⛽', maintenance: '🔧', control: '📋', repair: '🛠️', expense: '🧾',
+  project: '🏁', document: '📄', photo: '📷', outing: '🛣️', other: '✔️'
+};
 const UNIT_SHORT = { km: 'km', miles: 'miles', hours: 'h' };
-const FORM_FIELDS = [
-  'name', 'category', 'make', 'model', 'version', 'year', 'status',
-  'registration', 'vin_serial', 'purchase_date',
-  'counter_unit', 'purchase_counter', 'current_counter', 'purchase_price'
-];
 
-let currentUser = null;
-let lists = {};
-let navDepth = 0;
-let editingVehicleId = null;
+const state = { user: null, lists: {}, schemas: {}, navDepth: 0 };
 
-// Mémoire de l'appli : ce qui a déjà été vu s'affiche tout de suite
-const cache = { vehicles: null, details: {}, at: {} };
-
-// Modules (carburant, entretien…) : chacun peut avoir ses pages, enrichir la fiche et la liste
-const MODULES = [];
-function registerModule(m) { MODULES.push(m); }
-
-function remember(key, value) { cache.at[key] = Date.now(); return value; }
-function isFresh(key) { return cache.at[key] && (Date.now() - cache.at[key] < FRESH_MS); }
-function clearCache() {
-  cache.vehicles = null;
-  cache.details = {};
-  cache.at = {};
-  MODULES.forEach(function (m) { if (m.clear) m.clear(); });
-}
-
-// ===== API (POST en texte brut : pas de jeton dans l'adresse) =====
+// ===== API (POST en texte brut : le jeton ne passe jamais dans l'adresse) =====
 async function api(action, payload) {
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -47,10 +30,56 @@ async function api(action, payload) {
   return res.json();
 }
 
-// ===== Outils =====
-function $(id) { return document.getElementById(id); }
+// ===== Mémoire : ce qui a déjà été vu s'affiche tout de suite =====
+const store = {};
+function cached(key) { return store[key] ? store[key].value : undefined; }
+function put(key, value) { store[key] = { value: value, at: Date.now() }; return value; }
+function isFresh(key) { return !!store[key] && Date.now() - store[key].at < FRESH_MS; }
+function forget(test) { Object.keys(store).forEach(function (k) { if (test(k)) delete store[k]; }); }
+/** Marque comme « à redemander » (l'ancienne version reste affichée le temps du rechargement). */
+function stale(test) { Object.keys(store).forEach(function (k) { if (test(k)) store[k].at = 0; }); }
+function forgetVehicle(id) { stale(function (k) { return k === 'dash' || k === 'list' || k.slice(-id.length - 1) === ':' + id; }); }
 
-function setText(id, text) { $(id).textContent = text || ''; }
+/**
+ * Affiche la version en mémoire, puis la redemande au serveur si elle a plus de 30 s.
+ * opts : loading(), error(message, hadData), stillHere()
+ */
+async function load(key, fetcher, render, opts) {
+  opts = opts || {};
+  const has = cached(key) !== undefined;
+  if (has) render(cached(key), false);
+  else if (opts.loading) opts.loading();
+  if (has && isFresh(key)) return;
+  try {
+    const res = await fetcher();
+    if (!res.ok) {
+      if (res.code === 'AUTH') return showLogin(res.error);
+      if (opts.error) opts.error(res.error, has);
+      return;
+    }
+    const changed = !has || JSON.stringify(cached(key)) !== JSON.stringify(res.data);
+    put(key, res.data);
+    if (changed && (!opts.stillHere || opts.stillHere())) render(res.data, true);
+  } catch (err) {
+    if (opts.error) opts.error('Connexion impossible. Vérifie ta connexion internet puis réessaie.', has);
+  }
+}
+
+/** Appel d'écriture : renvoie les données, ou affiche l'erreur et renvoie null. */
+async function send(action, payload, onError) {
+  try {
+    const res = await api(action, payload);
+    if (res.ok) return res.data;
+    if (res.code === 'AUTH') { showLogin(res.error); return null; }
+    onError(res.error);
+  } catch (err) {
+    onError('Connexion impossible. Vérifie ta connexion internet puis réessaie.');
+  }
+  return null;
+}
+
+// ===== Outils d'affichage =====
+function $(id) { return document.getElementById(id); }
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -59,415 +88,427 @@ function el(tag, className, text) {
   return node;
 }
 
-function show(view) {
-  ['viewLoading', 'viewLogin', 'viewApp'].forEach(function (id) { $(id).classList.toggle('hidden', id !== view); });
+function button(label, className, onClick) {
+  const b = el('button', className, label);
+  b.type = 'button';
+  if (onClick) b.addEventListener('click', onClick);
+  return b;
 }
 
-function showPanel(panel) {
-  document.querySelectorAll('main > section').forEach(function (s) { s.classList.toggle('hidden', s.id !== panel); });
-  window.scrollTo(0, 0);
+const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+function backLink(label, onClick) {
+  const b = button('', 'back-link', onClick);
+  b.innerHTML = ICON_BACK;
+  b.appendChild(document.createTextNode(label));
+  return b;
 }
 
-function isVisible(id) { return !$(id).classList.contains('hidden'); }
+function isEmpty(v) { return v === null || v === undefined || v === ''; }
 
-function setVersion(version) {
-  document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = version ? 'Version ' + version : ''; });
+function fmtNum(n, decimals) {
+  return Number(n).toLocaleString('fr-FR', { maximumFractionDigits: decimals === undefined ? 2 : decimals });
 }
-
-function labelOf(group, key) {
-  if (key === null || key === undefined || key === '') return null;
-  const item = (lists[group] || []).find(function (i) { return i.key === String(key); });
-  return item ? item.label : String(key);
+function fmtMoney(n) {
+  if (isEmpty(n)) return null;
+  const whole = Math.round(Number(n) * 100) % 100 === 0;
+  return Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 });
 }
-
-function iconOf(category) { return CATEGORY_ICONS[String(category || '').toLowerCase()] || '🚙'; }
-
-function describe(v) {
-  return [v.make, v.model, v.version].filter(Boolean).join(' ') + (v.year ? ' · ' + v.year : '');
+function fmtCounter(value, unit) {
+  if (isEmpty(value)) return null;
+  return fmtNum(value, 1) + ' ' + (UNIT_SHORT[unit] || unit || 'km');
 }
-
-function formatDate(iso) {
+function fmtDate(iso) {
   if (!iso) return null;
   const p = String(iso).slice(0, 10).split('-');
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso);
 }
-
-function formatNumber(value, maxDecimals) {
-  return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: maxDecimals === undefined ? 2 : maxDecimals });
+function fmtDateLong(iso) {
+  if (!iso) return '';
+  const p = String(iso).slice(0, 10).split('-').map(Number);
+  return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 }
-
-function formatCounter(value, unit) {
-  if (value === null || value === undefined || value === '') return null;
-  return formatNumber(value, 1) + ' ' + (UNIT_SHORT[unit] || unit || '');
-}
-
-function formatPrice(value) {
-  if (value === null || value === undefined || value === '') return null;
-  return Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 });
-}
-
-function parseNumber(text) {
-  const s = String(text || '').replace(/\s/g, '').replace(',', '.');
-  return s === '' ? null : Number(s);
-}
-
 function todayIso() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
-
-function handleError(res, messageId) {
-  if (res.code === 'AUTH') return showLogin(res.error);
-  setText(messageId, res.error);
+function parseNum(text) {
+  const s = String(text === null || text === undefined ? '' : text).replace(/\s/g, '').replace(',', '.');
+  return s === '' ? null : Number(s);
 }
-
-function sameData(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function labelOf(group, key) {
+  if (isEmpty(key)) return null;
+  const item = (state.lists[group] || []).find(function (i) { return i.key === String(key); });
+  return item ? item.label : String(key);
+}
+function iconOf(category) { return CATEGORY_ICONS[String(category || '').toLowerCase()] || '🚙'; }
+function describe(v) { return [v.make, v.model, v.version].filter(Boolean).join(' ') + (v.year ? ', ' + v.year : ''); }
 
 // ===== Navigation (le bouton retour du téléphone fonctionne) =====
-function go(hash) { navDepth++; location.hash = hash; }
+const ROUTE_HANDLERS = {};
+function addRoute(name, handler) { ROUTE_HANDLERS[name] = handler; }
 
-function goBack(fallbackHash) {
-  if (navDepth > 0) { navDepth--; history.back(); }
-  else location.hash = fallbackHash || '';
+function link() {
+  return '#/' + Array.prototype.slice.call(arguments)
+    .filter(function (p) { return !isEmpty(p); })
+    .map(encodeURIComponent).join('/');
 }
-
-function goHome() {
-  if (navDepth > 0) { const n = navDepth; navDepth = 0; history.go(-n); }
-  else replaceRoute('');
+function routeParts() {
+  return location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
 }
-
+function go(hash) { state.navDepth++; location.hash = hash; }
 function replaceRoute(hash) {
   history.replaceState(null, '', location.pathname + location.search + hash);
   route();
 }
-
+function goBack(fallback) {
+  if (state.navDepth > 0) { state.navDepth--; history.back(); }
+  else replaceRoute(fallback || '#/');
+}
 function route() {
-  if (!currentUser) return;
-  const h = location.hash;
-  if (h === ROUTES.create) return showForm(null);
-  if (h.indexOf(ROUTES.edit) === 0) return showForm(decodeURIComponent(h.slice(ROUTES.edit.length)));
-  if (h.indexOf(ROUTES.detail) === 0) return showDetail(decodeURIComponent(h.slice(ROUTES.detail.length)));
-  for (const m of MODULES) { if (m.route && m.route(h)) return; }
-  showList();
+  if (!state.user) return;
+  if (state.currentHash !== location.hash) { state.prevHash = state.currentHash; state.currentHash = location.hash; }
+  closeLayer();
+  const parts = routeParts();
+  const handler = ROUTE_HANDLERS[parts[0] || ''] || ROUTE_HANDLERS[''];
+  handler(parts.slice(1));
 }
 
-// ===== Liste =====
-function renderVehicles(vehicles) {
-  MODULES.forEach(function (m) { if (m.onVehicles) m.onVehicles(vehicles); });
-  const list = $('vehicleList');
-  list.replaceChildren();
-  setText('vehiclesTitle', 'Mes véhicules (' + vehicles.length + ')');
-  if (vehicles.length === 0) {
-    list.appendChild(el('p', 'empty', 'Aucun véhicule pour le moment. Ajoute ton premier véhicule.'));
-    return;
-  }
-  vehicles.forEach(function (v) {
-    const card = el('button', 'vehicle');
-    card.type = 'button';
-    const top = el('div', 'vehicle-top');
-    top.appendChild(el('span', 'vehicle-icon', iconOf(v.category)));
-    top.appendChild(el('span', 'vehicle-name', v.name || v.vehicle_id));
-    card.appendChild(top);
-    card.appendChild(el('div', 'vehicle-desc', describe(v)));
+/** Prépare une nouvelle page dans la zone principale. nav : 'home' ou 'garage'. */
+function mountView(nav) {
+  const container = $('view');
+  const view = el('div', 'view');
+  if (!REDUCED_MOTION) view.classList.add('enter');
+  container.replaceChildren(view);
+  window.scrollTo(0, 0);
+  document.querySelectorAll('.navlink').forEach(function (a) { a.classList.toggle('active', a.dataset.nav === nav); });
+  return view;
+}
 
-    const chips = el('div', 'chips');
-    if ('registration' in v) chips.appendChild(el('span', 'chip', v.registration || 'Non immatriculé'));
-    if ('current_counter' in v) chips.appendChild(el('span', 'chip', formatCounter(v.current_counter, v.counter_unit) || 'Compteur non renseigné'));
-    if (v.status && v.status !== 'active') chips.appendChild(el('span', 'chip', labelOf('vehicle_status', v.status)));
-    if (chips.childNodes.length) card.appendChild(chips);
+// ===== Composants =====
 
-    card.addEventListener('click', function () { go(ROUTES.detail + encodeURIComponent(v.vehicle_id)); });
-    list.appendChild(card);
+/** Compteur à tambours. opts : pad (nb de chiffres minimum), unit, animate, lastDrum (dernier tambour clair) */
+function odometer(value, opts) {
+  opts = opts || {};
+  const wrap = el('span', 'odometer');
+  wrap.setAttribute('role', 'img');
+  const n = Math.max(0, Math.round(Number(value) || 0));
+  const digits = String(n).padStart(opts.pad || 1, '0').split('');
+  wrap.setAttribute('aria-label', fmtNum(n, 0) + (opts.unit ? ' ' + opts.unit : ''));
+  const strips = [];
+  digits.forEach(function (d, i) {
+    const drum = el('span', 'drum' + (opts.lastDrum && i === digits.length - 1 ? ' last' : ''));
+    const strip = el('span', 'strip');
+    for (let k = 0; k <= 9; k++) strip.appendChild(el('span', null, String(k)));
+    strip.style.setProperty('--d', opts.animate && !REDUCED_MOTION ? '0' : d);
+    drum.appendChild(strip);
+    wrap.appendChild(drum);
+    strips.push({ strip: strip, d: d, i: i });
   });
-}
-
-async function showList() {
-  showPanel('listView');
-  setText('listMessage', '');
-  if (cache.vehicles) renderVehicles(cache.vehicles);
-  else {
-    setText('vehiclesTitle', 'Mes véhicules');
-    $('vehicleList').replaceChildren(el('p', 'empty', 'Chargement des véhicules…'));
+  if (opts.unit) wrap.appendChild(el('span', 'odo-unit', opts.unit));
+  if (opts.animate && !REDUCED_MOTION) {
+    wrap.classList.add('rolling');
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        strips.forEach(function (s) {
+          s.strip.style.transitionDelay = (strips.length - 1 - s.i) * 70 + 'ms';
+          s.strip.style.setProperty('--d', s.d);
+        });
+      });
+    });
   }
-  if (cache.vehicles && isFresh('list')) return;
-
-  try {
-    const res = await api('vehicles.list');
-    if (!res.ok) {
-      if (!cache.vehicles) $('vehicleList').replaceChildren();
-      return handleError(res, 'listMessage');
-    }
-    const changed = !sameData(cache.vehicles, res.data.vehicles);
-    cache.vehicles = remember('list', res.data.vehicles);
-    if (changed && isVisible('listView')) renderVehicles(cache.vehicles);
-  } catch (err) {
-    setText('listMessage', 'Connexion impossible : ' + err.message);
-  }
-}
-
-// ===== Fiche =====
-function section(title, rows) {
-  const s = el('section', 'section');
-  s.appendChild(el('h3', null, title));
-  const dl = el('dl');
-  rows.forEach(function (r) {
-    const row = el('div', 'row');
-    row.appendChild(el('dt', null, r[0]));
-    const empty = r[1] === null || r[1] === undefined || r[1] === '';
-    row.appendChild(el('dd', null, empty ? 'Non renseigné' : r[1]));
-    dl.appendChild(row);
-  });
-  s.appendChild(dl);
-  return s;
-}
-
-function counterForm(v) {
-  const wrap = el('div');
-  const form = el('form', 'inline-form');
-  const input = el('input');
-  input.inputMode = 'decimal';
-  input.placeholder = 'Nouveau relevé';
-  input.setAttribute('aria-label', 'Nouveau relevé du compteur');
-  const btn = el('button', 'btn-primary', 'Enregistrer');
-  btn.type = 'submit';
-  const msg = el('div', 'message');
-  form.appendChild(input);
-  form.appendChild(btn);
-  wrap.appendChild(form);
-  wrap.appendChild(msg);
-
-  form.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    btn.disabled = true;
-    msg.textContent = '';
-    try {
-      const res = await api('vehicles.updateCounter', { vehicleId: v.vehicle_id, counter: input.value });
-      if (res.ok) {
-        cache.details[v.vehicle_id] = remember('detail:' + v.vehicle_id, res.data.vehicle);
-        delete cache.at.list;
-        return renderDetail(res.data.vehicle);
-      }
-      if (res.code === 'AUTH') return showLogin(res.error);
-      msg.textContent = res.error;
-    } catch (err) {
-      msg.textContent = 'Connexion impossible : ' + err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
   return wrap;
 }
 
-function renderDetail(v) {
-  const box = $('detailContent');
-  box.replaceChildren();
-
-  $('editBtn').classList.toggle('hidden', !v.can_edit);
-  $('editBtn').onclick = function () { go(ROUTES.edit + encodeURIComponent(v.vehicle_id)); };
-
-  const head = el('div', 'detail-head');
-  head.appendChild(el('span', 'detail-icon', iconOf(v.category)));
-  head.appendChild(el('h2', 'detail-name', v.name || v.vehicle_id));
-  box.appendChild(head);
-  box.appendChild(el('p', 'detail-desc', describe(v)));
-
-  box.appendChild(section('Identité', [
-    ['Catégorie', labelOf('vehicle_category', v.category)],
-    ['Marque', v.make],
-    ['Modèle', v.model],
-    ['Version', v.version],
-    ['Année', v.year],
-    ['Statut', labelOf('vehicle_status', v.status)]
-  ]));
-
-  if ('registration' in v) {
-    box.appendChild(section('Informations', [
-      ['Immatriculation', v.registration],
-      ['N° de série (VIN)', v.vin_serial],
-      ["Date d'achat", formatDate(v.purchase_date)],
-      ['Propriétaire', v.owner_name]
-    ]));
-  }
-
-  if ('current_counter' in v) {
-    const counter = section('Compteur', [
-      ['Compteur actuel', formatCounter(v.current_counter, v.counter_unit)],
-      ['Dernier relevé', formatDate(v.counter_reading_date)],
-      ["Compteur à l'achat", formatCounter(v.purchase_counter, v.counter_unit)]
-    ]);
-    if (v.can_update_counter) counter.appendChild(counterForm(v));
-    box.appendChild(counter);
-  }
-
-  if ('purchase_price' in v) {
-    box.appendChild(section('Finances', [["Prix d'achat", formatPrice(v.purchase_price)]]));
-  }
-
-  MODULES.forEach(function (m) { if (m.detail) m.detail(v, box); });
-
-  if (v.hidden_topics && v.hidden_topics.length) {
-    box.appendChild(el('p', 'note', 'Certaines informations de ce véhicule ne sont pas partagées avec toi.'));
-  }
+/** Plaque : noire pour l'ancien format (3012 SJ 45), blanche à bandes bleues pour AB-123-CD. */
+function plate(registration) {
+  const reg = String(registration || '').trim();
+  if (!reg) return el('span', 'plate none', 'Non immatriculé');
+  const siv = /^[A-Z]{2}[- ]?\d{3}[- ]?[A-Z]{2}$/i.test(reg);
+  const p = el('span', 'plate ' + (siv ? 'siv' : 'old'));
+  p.appendChild(el('span', 'txt', reg.toUpperCase()));
+  return p;
 }
 
-async function showDetail(vehicleId) {
-  showPanel('detailView');
-  setText('detailMessage', '');
-  const key = 'detail:' + vehicleId;
-  const cached = cache.details[vehicleId];
+function gauge(progress, alert) {
+  const g = el('div', 'gauge ' + (alert || ''));
+  const i = el('i');
+  const pct = Math.round(Math.max(0, Math.min(1, progress || 0)) * 100);
+  i.style.setProperty('--p', REDUCED_MOTION ? pct + '%' : '0%');
+  g.appendChild(i);
+  if (!REDUCED_MOTION) requestAnimationFrame(function () { requestAnimationFrame(function () { i.style.setProperty('--p', pct + '%'); }); });
+  return g;
+}
 
-  if (cached) renderDetail(cached);
-  else {
-    $('editBtn').classList.add('hidden');
-    $('detailContent').replaceChildren(el('p', 'empty', 'Chargement de la fiche…'));
+function skeleton(count) {
+  const s = el('div', 'skeleton');
+  for (let i = 0; i < (count || 3); i++) s.appendChild(el('i'));
+  return s;
+}
+
+function emptyState(text, actionLabel, onAction) {
+  const box = el('div', 'empty');
+  box.appendChild(el('div', null, text));
+  if (actionLabel) box.appendChild(button(actionLabel, 'btn btn-primary btn-small', onAction));
+  return box;
+}
+
+function errorBox(text) { return el('div', 'error-box', text); }
+
+/** Carnet : lignes « libellé ........ valeur ». rows = [[libellé, valeur], ...] */
+function logbook(title, rows) {
+  const box = el('section', 'logbook');
+  if (title) box.appendChild(el('h3', null, title));
+  const dl = el('dl');
+  rows.forEach(function (r) {
+    const row = el('div', 'lb-row');
+    row.appendChild(el('dt', null, r[0]));
+    row.appendChild(el('span', 'dots'));
+    const empty = isEmpty(r[1]);
+    row.appendChild(el('dd', empty ? 'lb-empty' : null, empty ? 'Non renseigné' : r[1]));
+    dl.appendChild(row);
+  });
+  box.appendChild(dl);
+  return box;
+}
+
+let toastTimer = null;
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+}
+
+// Panneaux et boîtes de dialogue (une seule couche à la fois)
+let layerClose = null;
+function closeLayer() { if (layerClose) layerClose(); }
+
+/** Panneau montant du bas. build(sheet, close) remplit le panneau. */
+function openSheet(build) {
+  closeLayer();
+  const layer = $('layer');
+  const overlay = el('div', 'overlay');
+  const sheet = el('div', 'sheet');
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.appendChild(el('div', 'sheet-grip'));
+  let closed = false;
+  function close() {
+    if (closed) return;
+    closed = true;
+    layerClose = null;
+    document.removeEventListener('keydown', onKey);
+    if (REDUCED_MOTION) return layer.replaceChildren();
+    sheet.classList.add('closing');
+    overlay.classList.add('closing');
+    setTimeout(function () { if (layer.contains(sheet)) layer.replaceChildren(); }, 200);
   }
-  if (cached && isFresh(key)) return;
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  layer.replaceChildren(overlay, sheet);
+  layerClose = close;
+  build(sheet, close);
+  const first = sheet.querySelector('input, select, textarea, button');
+  if (first) first.focus({ preventScroll: true });
+  return close;
+}
 
-  try {
-    const res = await api('vehicles.get', { vehicleId: vehicleId });
-    const stillHere = location.hash === ROUTES.detail + encodeURIComponent(vehicleId);
-    if (!res.ok) {
-      delete cache.details[vehicleId];
-      if (!stillHere) return;
-      $('detailContent').replaceChildren();
-      $('editBtn').classList.add('hidden');
-      return handleError(res, 'detailMessage');
+/** Confirmation. Renvoie une promesse : true si l'action est confirmée. */
+function confirmDialog(title, text, confirmLabel) {
+  return new Promise(function (resolve) {
+    closeLayer();
+    const layer = $('layer');
+    const overlay = el('div', 'overlay');
+    const box = el('div', 'dialog');
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    box.appendChild(el('h2', null, title));
+    box.appendChild(el('p', null, text));
+    const actions = el('div', 'form-actions');
+    function done(value) {
+      layerClose = null;
+      document.removeEventListener('keydown', onKey);
+      layer.replaceChildren();
+      resolve(value);
     }
-    const changed = !sameData(cached, res.data.vehicle);
-    cache.details[vehicleId] = remember(key, res.data.vehicle);
-    if (changed && stillHere) renderDetail(res.data.vehicle);
-  } catch (err) {
-    setText('detailMessage', 'Connexion impossible : ' + err.message);
-  }
-}
-
-// ===== Formulaire (création, modification, suppression) =====
-function fillSelect(select, group, placeholder) {
-  select.replaceChildren();
-  if (placeholder) select.appendChild(new Option(placeholder, ''));
-  (lists[group] || []).forEach(function (i) { select.appendChild(new Option(i.label, i.key)); });
-}
-
-function setFormEnabled(enabled) {
-  $('vehicleForm').querySelectorAll('input, select, button').forEach(function (x) { x.disabled = !enabled; });
-  $('deleteBtn').disabled = !enabled;
-}
-
-function fillForm(v) {
-  const form = $('vehicleForm');
-  FORM_FIELDS.forEach(function (f) {
-    if (f === 'current_counter' || !form.elements[f]) return;
-    form.elements[f].value = (v[f] === null || v[f] === undefined) ? '' : v[f];
+    function onKey(e) { if (e.key === 'Escape') done(false); }
+    actions.appendChild(button('Annuler', 'btn btn-ghost', function () { done(false); }));
+    actions.appendChild(button(confirmLabel || 'Supprimer', 'btn btn-danger', function () { done(true); }));
+    box.appendChild(actions);
+    overlay.addEventListener('click', function () { done(false); });
+    document.addEventListener('keydown', onKey);
+    layer.replaceChildren(overlay, box);
+    layerClose = function () { done(false); };
+    actions.firstChild.focus();
   });
 }
 
-async function showForm(vehicleId) {
-  showPanel('formView');
-  editingVehicleId = vehicleId;
-  const form = $('vehicleForm');
-  form.reset();
-  setText('formMessage', '');
-  fillSelect(form.elements['category'], 'vehicle_category', 'Choisir…');
-  fillSelect(form.elements['status'], 'vehicle_status', null);
-  fillSelect(form.elements['counter_unit'], 'counter_unit', null);
-  $('currentCounterField').classList.toggle('hidden', !!vehicleId);
-  $('deleteBtn').classList.add('hidden');
+// ===== Formulaires générés à partir d'une description de champs =====
 
-  if (!vehicleId) {
-    setText('formTitle', 'Nouveau véhicule');
-    form.elements['status'].value = 'active';
-    form.elements['counter_unit'].value = 'km';
-    setFormEnabled(true);
-    return;
+/**
+ * fields : [{ section: 'Titre' } | { name, label, kind, required, default, group, exclude, options,
+ *            showIf, help, helpBy, placeholder, topic, readonly, virtual, from, defaultToday }]
+ * values : valeurs existantes (modification) ; opts : { isCreate, hiddenTopics, refOptions }
+ */
+function buildForm(fields, values, opts) {
+  opts = opts || {};
+  values = values || {};
+  const hidden = opts.hiddenTopics || [];
+  const form = el(opts.asPart ? 'div' : 'form', 'form');
+  if (!opts.asPart) form.noValidate = true;
+  const controls = {};
+  let box = null;
+
+  function current() {
+    const out = {};
+    Object.keys(controls).forEach(function (name) {
+      const c = controls[name];
+      out[name] = c.kind === 'bool' ? c.input.checked : c.input.value;
+    });
+    return out;
   }
 
-  setText('formTitle', 'Modifier le véhicule');
-  let v = cache.details[vehicleId];
-  if (!v) {
-    setFormEnabled(false);
-    $('cancelBtn').disabled = false;
-    try {
-      const res = await api('vehicles.get', { vehicleId: vehicleId });
-      if (!res.ok) return handleError(res, 'formMessage');
-      v = cache.details[vehicleId] = remember('detail:' + vehicleId, res.data.vehicle);
-    } catch (err) {
-      return setText('formMessage', 'Connexion impossible : ' + err.message);
-    }
+  function refresh() {
+    const vals = current();
+    Object.keys(controls).forEach(function (name) {
+      const c = controls[name];
+      const f = c.field;
+      const shown = !f.showIf || f.showIf.values.indexOf(String(vals[f.showIf.field])) !== -1;
+      c.wrap.classList.toggle('hidden', !shown);
+      if (f.helpBy && c.help) {
+        const key = f.showIf ? vals[f.showIf.field] : null;
+        c.help.textContent = f.helpBy[key] || f.help || '';
+      }
+    });
   }
-  if (!v.can_edit) return setText('formMessage', 'Tu ne peux pas modifier ce véhicule.');
-  fillForm(v);
-  setFormEnabled(true);
-  $('deleteBtn').classList.remove('hidden');
-}
 
-async function submitForm(e) {
-  e.preventDefault();
-  const form = $('vehicleForm');
-  const payload = {};
-  FORM_FIELDS.forEach(function (f) {
-    if (f === 'current_counter' && editingVehicleId) return;
-    if (form.elements[f]) payload[f] = form.elements[f].value.trim();
-  });
-  if (!payload.name) return setText('formMessage', 'Le nom est obligatoire.');
-  if (!payload.category) return setText('formMessage', 'La catégorie est obligatoire.');
-
-  setText('formMessage', '');
-  setFormEnabled(false);
-  try {
-    const action = editingVehicleId ? 'vehicles.update' : 'vehicles.create';
-    const res = await api(action, { vehicleId: editingVehicleId, vehicle: payload });
-    if (res.ok) {
-      const v = res.data.vehicle;
-      cache.details[v.vehicle_id] = remember('detail:' + v.vehicle_id, v);
-      delete cache.at.list;
-      if (editingVehicleId) goBack(ROUTES.detail + encodeURIComponent(editingVehicleId));
-      else replaceRoute(ROUTES.detail + encodeURIComponent(v.vehicle_id));
+  fields.forEach(function (f) {
+    if (f.section) {
+      box = el('div', 'fieldset');
+      box.appendChild(el('h3', null, f.section));
+      form.appendChild(box);
       return;
     }
-    handleError(res, 'formMessage');
-  } catch (err) {
-    setText('formMessage', 'Connexion impossible : ' + err.message);
-  } finally {
-    setFormEnabled(true);
-  }
-}
+    if (f.readonly || f.kind === 'mixed') return;
+    if (f.topic && hidden.indexOf(f.topic) !== -1) return;
+    if (f.createOnly && !opts.isCreate) return;
+    if (!box) { box = el('div', 'fieldset'); form.appendChild(box); }
 
-async function deleteVehicle() {
-  const id = editingVehicleId;
-  const v = cache.details[id];
-  const name = v ? v.name : id;
-  if (!confirm('Supprimer définitivement « ' + name + ' » ?\n\nCette action est irréversible.')) return;
+    let value = values[f.from || f.name];
+    if (opts.isCreate && isEmpty(value)) value = f.defaultToday ? todayIso() : f.default;
+    if (f.kind === 'date' && value) value = String(value).slice(0, 10);
 
-  setText('formMessage', '');
-  setFormEnabled(false);
-  try {
-    const res = await api('vehicles.delete', { vehicleId: id });
-    if (res.ok) {
-      delete cache.details[id];
-      if (cache.vehicles) cache.vehicles = cache.vehicles.filter(function (x) { return x.vehicle_id !== id; });
-      return goHome();
+    let input;
+    let wrap;
+    if (f.kind === 'bool') {
+      wrap = el('label', 'switch');
+      wrap.appendChild(el('span', null, f.label));
+      input = el('input');
+      input.type = 'checkbox';
+      input.checked = value === undefined ? true : !(value === false || String(value).toUpperCase() === 'FALSE');
+      wrap.appendChild(input);
+    } else {
+      wrap = el('label', 'field');
+      const lab = el('span', null, f.label);
+      if (f.required) lab.appendChild(el('b', 'req', ' *'));
+      wrap.appendChild(lab);
+      if (f.kind === 'longtext') {
+        input = el('textarea');
+      } else if (f.kind === 'choice' || f.kind === 'static' || f.kind === 'ref') {
+        input = el('select');
+        const options = f.kind === 'choice'
+          ? (state.lists[f.group] || []).filter(function (i) { return !f.exclude || f.exclude.indexOf(i.key) === -1; }).map(function (i) { return [i.key, i.label]; })
+          : (f.kind === 'static' ? f.options : ((opts.refOptions || {})[f.name] || []));
+        if (!f.required || f.kind === 'ref') input.appendChild(new Option(f.kind === 'ref' ? 'Aucun' : '—', ''));
+        options.forEach(function (o) { input.appendChild(new Option(o[1], o[0])); });
+      } else {
+        input = el('input');
+        if (f.kind === 'date') input.type = 'date';
+        else if (f.kind === 'number') input.inputMode = 'decimal';
+        else if (f.kind === 'integer') input.inputMode = 'numeric';
+        if (f.max && (f.kind === 'text')) input.maxLength = f.max;
+        input.autocomplete = 'off';
+      }
+      if (f.placeholder) input.placeholder = f.placeholder;
+      if (!isEmpty(value)) input.value = (f.kind === 'number' && typeof value === 'number') ? String(value).replace('.', ',') : value;
+      wrap.appendChild(input);
     }
-    handleError(res, 'formMessage');
-  } catch (err) {
-    setText('formMessage', 'Connexion impossible : ' + err.message);
-  } finally {
-    setFormEnabled(true);
-  }
+    input.name = f.name;
+    let help = null;
+    if (f.help || f.helpBy) {
+      help = el('p', 'help', f.help || '');
+      wrap.appendChild(help);
+    }
+    box.appendChild(wrap);
+    controls[f.name] = { field: f, input: input, wrap: wrap, help: help, kind: f.kind };
+    input.addEventListener('change', refresh);
+    input.addEventListener('input', function () { if (opts.onInput) opts.onInput(current()); });
+  });
+
+  const message = el('p', 'form-message');
+  message.setAttribute('role', 'alert');
+  form.appendChild(message);
+  refresh();
+
+  return {
+    node: form,
+    controls: controls,
+    message: function (text) { message.textContent = text || ''; },
+    /** Valeurs des champs affichés ; null (avec message) si un champ obligatoire est vide. */
+    read: function () {
+      const out = {};
+      const vals = current();
+      const names = Object.keys(controls);
+      for (let i = 0; i < names.length; i++) {
+        const c = controls[names[i]];
+        if (c.wrap.classList.contains('hidden')) continue;
+        const v = c.kind === 'bool' ? vals[names[i]] : String(vals[names[i]]).trim();
+        if (c.field.required && v === '') {
+          message.textContent = c.field.label + ' : champ obligatoire.';
+          c.input.focus();
+          return null;
+        }
+        out[names[i]] = v;
+      }
+      message.textContent = '';
+      return out;
+    },
+    busy: function (on) { form.querySelectorAll('input, select, textarea, button').forEach(function (x) { x.disabled = on; }); }
+  };
 }
 
-function cancelForm() {
-  goBack(editingVehicleId ? ROUTES.detail + encodeURIComponent(editingVehicleId) : '');
+/** Boutons Annuler / Enregistrer en bas d'un formulaire. */
+function formActions(saveLabel, onCancel) {
+  const actions = el('div', 'form-actions');
+  actions.appendChild(button('Annuler', 'btn btn-ghost', onCancel));
+  const save = el('button', 'btn btn-primary', saveLabel);
+  save.type = 'submit';
+  actions.appendChild(save);
+  return actions;
 }
 
 // ===== Session =====
+function setVersion(v) {
+  document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = v ? 'Version ' + v : ''; });
+}
+
+function showScreen(id) {
+  ['screenLoading', 'screenLogin', 'screenApp'].forEach(function (s) { $(s).classList.toggle('hidden', s !== id); });
+}
+
 function enterApp(data) {
-  currentUser = data.user;
-  lists = data.lists || {};
-  clearCache();
-  cache.vehicles = remember('list', data.vehicles || []);
+  state.user = data.user;
+  state.lists = data.lists || {};
+  state.schemas = data.schemas || {};
+  forget(function () { return true; });
+  put('list', { vehicles: data.vehicles || [] });
+  if (data.dashboard) put('dash', data.dashboard);
+  state.version = data.version;
   setVersion(data.version);
-  setText('userLabel', currentUser.name + (currentUser.role ? ' · ' + labelOf('user_role', currentUser.role) : ''));
-  show('viewApp');
+  $('userBtn').textContent = String(state.user.name || '?').charAt(0).toUpperCase();
+  showScreen('screenApp');
   route();
 }
 
@@ -477,77 +518,74 @@ async function bootstrap() {
     if (res.ok) return enterApp(res.data);
     showLogin(res.code === 'AUTH' ? '' : res.error);
   } catch (err) {
-    showLogin('Connexion impossible : ' + err.message);
+    showLogin('Connexion impossible. Vérifie ta connexion internet puis réessaie.');
   }
 }
 
 let gisReady = false;
 let wantButton = false;
-
 function onGisLoad() {
   google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onGoogleCredential });
   gisReady = true;
   if (wantButton) renderGoogleButton();
 }
-
 function renderGoogleButton() {
   wantButton = true;
   if (!gisReady) return;
-  google.accounts.id.renderButton($('googleBtn'), {
-    theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'fr'
-  });
+  google.accounts.id.renderButton($('googleBtn'), { theme: 'filled_black', size: 'large', text: 'signin_with', shape: 'pill', locale: 'fr' });
 }
 
 function showLogin(message) {
-  currentUser = null;
-  clearCache();
+  state.user = null;
+  forget(function () { return true; });
+  closeLayer();
   localStorage.removeItem(TOKEN_KEY);
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
-  show('viewLogin');
+  showScreen('screenLogin');
   renderGoogleButton();
-  setText('loginMessage', message);
-  fetch(API_URL + '?action=ping')
-    .then(function (r) { return r.json(); })
-    .then(function (d) { setVersion(d.version); })
-    .catch(function () { setVersion(null); });
+  $('loginMessage').textContent = message || '';
+  fetch(API_URL + '?action=ping').then(function (r) { return r.json(); })
+    .then(function (d) { setVersion(d.version); }).catch(function () { setVersion(null); });
 }
 
 async function onGoogleCredential(response) {
-  show('viewLoading');
+  showScreen('screenLoading');
   try {
     const res = await api('login', { idToken: response.credential });
     if (!res.ok) return showLogin(res.error);
     localStorage.setItem(TOKEN_KEY, res.data.token);
     bootstrap();
   } catch (err) {
-    showLogin('Connexion impossible : ' + err.message);
+    showLogin('Connexion impossible. Vérifie ta connexion internet puis réessaie.');
   }
 }
 
-async function logout() {
-  show('viewLoading');
-  try { await api('logout'); } catch (err) { /* la session locale est supprimée quoi qu'il arrive */ }
-  if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
-  showLogin('');
+function openAccount() {
+  openSheet(function (sheet, close) {
+    sheet.appendChild(el('h2', null, state.user.name));
+    sheet.appendChild(el('p', 'muted', [state.user.email, labelOf('user_role', state.user.role)].filter(Boolean).join(', ')));
+    const menu = el('div', 'menu');
+    const out = button('', 'menu-item', async function () {
+      close();
+      showScreen('screenLoading');
+      try { await api('logout'); } catch (err) { /* la session locale est supprimée quoi qu'il arrive */ }
+      if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+      showLogin('');
+    });
+    out.appendChild(el('span', 'mi-icon', '🚪'));
+    out.appendChild(el('b', null, 'Se déconnecter'));
+    menu.appendChild(out);
+    sheet.appendChild(menu);
+    if (state.version) sheet.appendChild(el('p', 'muted', 'Version ' + state.version));
+  });
 }
 
-// ===== Démarrage (après le chargement de tous les modules) =====
+// ===== Démarrage, une fois tous les fichiers chargés =====
 function start() {
-  const del = el('button', 'btn-danger hidden', 'Supprimer ce véhicule');
-  del.type = 'button';
-  del.id = 'deleteBtn';
-  del.addEventListener('click', deleteVehicle);
-  $('formView').appendChild(del);
-
-  $('logoutBtn').addEventListener('click', logout);
-  $('backBtn').addEventListener('click', function () { goBack(''); });
-  $('addBtn').addEventListener('click', function () { go(ROUTES.create); });
-  $('cancelBtn').addEventListener('click', cancelForm);
-  $('vehicleForm').addEventListener('submit', submitForm);
+  $('userBtn').addEventListener('click', openAccount);
+  $('fab').addEventListener('click', function () { if (typeof openQuickAdd === 'function') openQuickAdd(); });
   window.addEventListener('hashchange', route);
-
   if (!localStorage.getItem(TOKEN_KEY)) return showLogin('');
   bootstrap();
 }
-
 document.addEventListener('DOMContentLoaded', start);

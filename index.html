@@ -2,124 +2,75 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>MOBYLYTY</title>
   <meta name="description" content="Gestion de garage">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1c1f26" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#16323B">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="MOBYLYTY">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Big+Shoulders+Display:wght@600;700;800&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
   <!-- Chargement -->
-  <div id="viewLoading" class="center">
-    <div class="card">
-      <h1 class="logo">MOBYLYTY</h1>
-      <p class="sub">Chargement…</p>
+  <div id="screenLoading" class="screen-center">
+    <div class="splash">
+      <div class="wordmark">MOBYLYTY</div>
+      <p class="splash-sub">Ouverture du garage…</p>
     </div>
   </div>
 
   <!-- Connexion -->
-  <div id="viewLogin" class="center hidden">
-    <div class="card">
-      <h1 class="logo">MOBYLYTY</h1>
-      <p class="sub">Gestion de garage</p>
+  <div id="screenLogin" class="screen-center hidden">
+    <div class="splash">
+      <div class="wordmark">MOBYLYTY</div>
+      <p class="splash-sub">Le carnet de bord de ton garage</p>
       <div id="googleBtn"></div>
-      <div id="loginMessage" class="message"></div>
-      <div class="version js-version"></div>
+      <p id="loginMessage" class="form-message" role="alert"></p>
+      <p class="version js-version"></p>
     </div>
   </div>
 
   <!-- Application -->
-  <div id="viewApp" class="hidden">
-    <header>
-      <div>
-        <div class="brand">MOBYLYTY</div>
-        <div id="userLabel" class="user"></div>
-      </div>
-      <button id="logoutBtn" class="btn-secondary" type="button">Se déconnecter</button>
+  <div id="screenApp" class="hidden">
+    <header class="topbar">
+      <a class="wordmark small" href="#/">MOBYLYTY</a>
+      <button id="userBtn" class="avatar" type="button" aria-label="Mon compte"></button>
     </header>
 
-    <main>
-      <!-- Liste -->
-      <section id="listView">
-        <div class="title-row">
-          <h2 id="vehiclesTitle">Mes véhicules</h2>
-          <div id="listActions" class="actions">
-            <button id="addBtn" class="btn-primary" type="button">Ajouter un véhicule</button>
-          </div>
-        </div>
-        <div id="listMessage" class="message"></div>
-        <div id="vehicleList" class="grid"></div>
-      </section>
+    <main id="view" tabindex="-1"></main>
 
-      <!-- Fiche -->
-      <section id="detailView" class="hidden">
-        <div class="toolbar">
-          <button id="backBtn" class="btn-secondary" type="button">Retour à mes véhicules</button>
-          <button id="editBtn" class="btn-secondary hidden" type="button">Modifier</button>
-        </div>
-        <div id="detailMessage" class="message"></div>
-        <div id="detailContent"></div>
-      </section>
-
-      <!-- Formulaire -->
-      <section id="formView" class="hidden">
-        <h2 id="formTitle">Nouveau véhicule</h2>
-        <form id="vehicleForm" novalidate>
-          <fieldset class="section">
-            <legend>Identité</legend>
-            <label>Nom<span class="req">*</span><input name="name" maxlength="80" autocomplete="off"></label>
-            <label>Catégorie<span class="req">*</span><select name="category"></select></label>
-            <label>Marque<input name="make" maxlength="60" autocomplete="off"></label>
-            <label>Modèle<input name="model" maxlength="60" autocomplete="off"></label>
-            <label>Version<input name="version" maxlength="60" autocomplete="off"></label>
-            <label>Année<input name="year" inputmode="numeric" maxlength="4" autocomplete="off"></label>
-            <label>Statut<select name="status"></select></label>
-          </fieldset>
-
-          <fieldset class="section">
-            <legend>Informations</legend>
-            <label>Immatriculation<input name="registration" maxlength="20" autocapitalize="characters" autocomplete="off"></label>
-            <label>N° de série (VIN)<input name="vin_serial" maxlength="40" autocapitalize="characters" autocomplete="off"></label>
-            <label>Date d'achat<input name="purchase_date" type="date"></label>
-          </fieldset>
-
-          <fieldset class="section">
-            <legend>Compteur</legend>
-            <label>Unité<span class="req">*</span><select name="counter_unit"></select></label>
-            <label>Compteur à l'achat<input name="purchase_counter" inputmode="decimal" autocomplete="off"></label>
-            <label id="currentCounterField">Compteur actuel<input name="current_counter" inputmode="decimal" autocomplete="off"></label>
-          </fieldset>
-
-          <fieldset class="section">
-            <legend>Finances</legend>
-            <label>Prix d'achat (€)<input name="purchase_price" inputmode="decimal" autocomplete="off"></label>
-          </fieldset>
-
-          <div id="formMessage" class="message"></div>
-          <div class="form-actions">
-            <button id="cancelBtn" class="btn-secondary" type="button">Annuler</button>
-            <button id="saveBtn" class="btn-primary" type="submit">Enregistrer</button>
-          </div>
-        </form>
-      </section>
-    </main>
-
-    <footer class="js-version"></footer>
+    <nav class="bottomnav" aria-label="Navigation principale">
+      <a class="navlink" data-nav="home" href="#/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>
+        <span>Accueil</span>
+      </a>
+      <button id="fab" class="fab" type="button" aria-label="Ajouter">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <a class="navlink" data-nav="garage" href="#/garage">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20V9l9-5 9 5v11M7 20v-7h10v7M7 16h10"/></svg>
+        <span>Garage</span>
+      </a>
+    </nav>
   </div>
+
+  <div id="layer"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="config.js"></script>
   <script src="app.js"></script>
-    <script src="fuel.js"></script>
-  <!-- Bibliothèque officielle Google, chargée après nos scripts -->
+  <script src="views.js"></script>
+  <script src="fuel.js"></script>
+  <script src="modules.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
 </body>
 </html>
