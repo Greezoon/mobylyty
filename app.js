@@ -24,9 +24,18 @@ let editingVehicleId = null;
 // Mémoire de l'appli : ce qui a déjà été vu s'affiche tout de suite
 const cache = { vehicles: null, details: {}, at: {} };
 
+// Modules (carburant, entretien…) : chacun peut avoir ses pages, enrichir la fiche et la liste
+const MODULES = [];
+function registerModule(m) { MODULES.push(m); }
+
 function remember(key, value) { cache.at[key] = Date.now(); return value; }
 function isFresh(key) { return cache.at[key] && (Date.now() - cache.at[key] < FRESH_MS); }
-function clearCache() { cache.vehicles = null; cache.details = {}; cache.at = {}; }
+function clearCache() {
+  cache.vehicles = null;
+  cache.details = {};
+  cache.at = {};
+  MODULES.forEach(function (m) { if (m.clear) m.clear(); });
+}
 
 // ===== API (POST en texte brut : pas de jeton dans l'adresse) =====
 async function api(action, payload) {
@@ -55,7 +64,7 @@ function show(view) {
 }
 
 function showPanel(panel) {
-  ['listView', 'detailView', 'formView'].forEach(function (id) { $(id).classList.toggle('hidden', id !== panel); });
+  document.querySelectorAll('main > section').forEach(function (s) { s.classList.toggle('hidden', s.id !== panel); });
   window.scrollTo(0, 0);
 }
 
@@ -83,14 +92,28 @@ function formatDate(iso) {
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso);
 }
 
+function formatNumber(value, maxDecimals) {
+  return Number(value).toLocaleString('fr-FR', { maximumFractionDigits: maxDecimals === undefined ? 2 : maxDecimals });
+}
+
 function formatCounter(value, unit) {
   if (value === null || value === undefined || value === '') return null;
-  return Number(value).toLocaleString('fr-FR') + ' ' + (UNIT_SHORT[unit] || unit || '');
+  return formatNumber(value, 1) + ' ' + (UNIT_SHORT[unit] || unit || '');
 }
 
 function formatPrice(value) {
   if (value === null || value === undefined || value === '') return null;
   return Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 });
+}
+
+function parseNumber(text) {
+  const s = String(text || '').replace(/\s/g, '').replace(',', '.');
+  return s === '' ? null : Number(s);
+}
+
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 function handleError(res, messageId) {
@@ -124,11 +147,13 @@ function route() {
   if (h === ROUTES.create) return showForm(null);
   if (h.indexOf(ROUTES.edit) === 0) return showForm(decodeURIComponent(h.slice(ROUTES.edit.length)));
   if (h.indexOf(ROUTES.detail) === 0) return showDetail(decodeURIComponent(h.slice(ROUTES.detail.length)));
+  for (const m of MODULES) { if (m.route && m.route(h)) return; }
   showList();
 }
 
 // ===== Liste =====
 function renderVehicles(vehicles) {
+  MODULES.forEach(function (m) { if (m.onVehicles) m.onVehicles(vehicles); });
   const list = $('vehicleList');
   list.replaceChildren();
   setText('vehiclesTitle', 'Mes véhicules (' + vehicles.length + ')');
@@ -277,6 +302,8 @@ function renderDetail(v) {
   if ('purchase_price' in v) {
     box.appendChild(section('Finances', [["Prix d'achat", formatPrice(v.purchase_price)]]));
   }
+
+  MODULES.forEach(function (m) { if (m.detail) m.detail(v, box); });
 
   if (v.hidden_topics && v.hidden_topics.length) {
     box.appendChild(el('p', 'note', 'Certaines informations de ce véhicule ne sont pas partagées avec toi.'));
@@ -504,7 +531,7 @@ async function logout() {
   showLogin('');
 }
 
-// ===== Démarrage =====
+// ===== Démarrage (après le chargement de tous les modules) =====
 function start() {
   const del = el('button', 'btn-danger hidden', 'Supprimer ce véhicule');
   del.type = 'button';
@@ -523,4 +550,4 @@ function start() {
   bootstrap();
 }
 
-start();
+document.addEventListener('DOMContentLoaded', start);
