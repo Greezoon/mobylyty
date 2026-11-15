@@ -1,6 +1,7 @@
 /* MOBYLYTY : fonctionnement de l'application. La configuration est dans config.js. */
 const TOKEN_KEY = 'mobylyty_token';
 const ROUTES = { detail: '#vehicule-', edit: '#modifier-', create: '#nouveau-vehicule' };
+const FRESH_MS = 30000; // en dessous de 30 s, une donnée en mémoire n'est pas redemandée
 const CATEGORY_ICONS = {
   'voiture': '🚗', 'moto': '🏍️', 'bateau': '🚤', 'remorque': '🚛',
   'ulm___paramoteur': '🪂', '3_axes': '🛩️', 'pendulaire': '🪂', 'parapente': '🪂',
@@ -19,6 +20,13 @@ let currentUser = null;
 let lists = {};
 let navDepth = 0;
 let editingVehicleId = null;
+
+// Mémoire de l'appli : ce qui a déjà été vu s'affiche tout de suite
+const cache = { vehicles: null, details: {}, at: {} };
+
+function remember(key, value) { cache.at[key] = Date.now(); return value; }
+function isFresh(key) { return cache.at[key] && (Date.now() - cache.at[key] < FRESH_MS); }
+function clearCache() { cache.vehicles = null; cache.details = {}; cache.at = {}; }
 
 // ===== API (POST en texte brut : pas de jeton dans l'adresse) =====
 async function api(action, payload) {
@@ -49,6 +57,12 @@ function show(view) {
 function showPanel(panel) {
   ['listView', 'detailView', 'formView'].forEach(function (id) { $(id).classList.toggle('hidden', id !== panel); });
   window.scrollTo(0, 0);
+}
+
+function isVisible(id) { return !$(id).classList.contains('hidden'); }
+
+function setVersion(version) {
+  document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = version ? 'Version ' + version : ''; });
 }
 
 function labelOf(group, key) {
@@ -84,12 +98,19 @@ function handleError(res, messageId) {
   setText(messageId, res.error);
 }
 
+function sameData(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
 // ===== Navigation (le bouton retour du téléphone fonctionne) =====
 function go(hash) { navDepth++; location.hash = hash; }
 
 function goBack(fallbackHash) {
   if (navDepth > 0) { navDepth--; history.back(); }
   else location.hash = fallbackHash || '';
+}
+
+function goHome() {
+  if (navDepth > 0) { const n = navDepth; navDepth = 0; history.go(-n); }
+  else replaceRoute('');
 }
 
 function replaceRoute(hash) {
@@ -138,16 +159,24 @@ function renderVehicles(vehicles) {
 async function showList() {
   showPanel('listView');
   setText('listMessage', '');
-  setText('vehiclesTitle', 'Mes véhicules');
-  $('vehicleList').replaceChildren(el('p', 'empty', 'Chargement des véhicules…'));
+  if (cache.vehicles) renderVehicles(cache.vehicles);
+  else {
+    setText('vehiclesTitle', 'Mes véhicules');
+    $('vehicleList').replaceChildren(el('p', 'empty', 'Chargement des véhicules…'));
+  }
+  if (cache.vehicles && isFresh('list')) return;
+
   try {
     const res = await api('vehicles.list');
-    if (res.ok) return renderVehicles(res.data.vehicles);
-    $('vehicleList').replaceChildren();
-    handleError(res, 'listMessage');
+    if (!res.ok) {
+      if (!cache.vehicles) $('vehicleList').replaceChildren();
+      return handleError(res, 'listMessage');
+    }
+    const changed = !sameData(cache.vehicles, res.data.vehicles);
+    cache.vehicles = remember('list', res.data.vehicles);
+    if (changed && isVisible('listView')) renderVehicles(cache.vehicles);
   } catch (err) {
-    $('vehicleList').replaceChildren();
-    setText('listMessage', 'API injoignable : ' + err.message);
+    setText('listMessage', 'Connexion impossible : ' + err.message);
   }
 }
 
@@ -188,11 +217,15 @@ function counterForm(v) {
     msg.textContent = '';
     try {
       const res = await api('vehicles.updateCounter', { vehicleId: v.vehicle_id, counter: input.value });
-      if (res.ok) return renderDetail(res.data.vehicle);
+      if (res.ok) {
+        cache.details[v.vehicle_id] = remember('detail:' + v.vehicle_id, res.data.vehicle);
+        delete cache.at.list;
+        return renderDetail(res.data.vehicle);
+      }
       if (res.code === 'AUTH') return showLogin(res.error);
       msg.textContent = res.error;
     } catch (err) {
-      msg.textContent = 'API injoignable : ' + err.message;
+      msg.textContent = 'Connexion impossible : ' + err.message;
     } finally {
       btn.disabled = false;
     }
@@ -252,21 +285,36 @@ function renderDetail(v) {
 
 async function showDetail(vehicleId) {
   showPanel('detailView');
-  $('editBtn').classList.add('hidden');
   setText('detailMessage', '');
-  $('detailContent').replaceChildren(el('p', 'empty', 'Chargement de la fiche…'));
+  const key = 'detail:' + vehicleId;
+  const cached = cache.details[vehicleId];
+
+  if (cached) renderDetail(cached);
+  else {
+    $('editBtn').classList.add('hidden');
+    $('detailContent').replaceChildren(el('p', 'empty', 'Chargement de la fiche…'));
+  }
+  if (cached && isFresh(key)) return;
+
   try {
     const res = await api('vehicles.get', { vehicleId: vehicleId });
-    if (res.ok) return renderDetail(res.data.vehicle);
-    $('detailContent').replaceChildren();
-    handleError(res, 'detailMessage');
+    const stillHere = location.hash === ROUTES.detail + encodeURIComponent(vehicleId);
+    if (!res.ok) {
+      delete cache.details[vehicleId];
+      if (!stillHere) return;
+      $('detailContent').replaceChildren();
+      $('editBtn').classList.add('hidden');
+      return handleError(res, 'detailMessage');
+    }
+    const changed = !sameData(cached, res.data.vehicle);
+    cache.details[vehicleId] = remember(key, res.data.vehicle);
+    if (changed && stillHere) renderDetail(res.data.vehicle);
   } catch (err) {
-    $('detailContent').replaceChildren();
-    setText('detailMessage', 'API injoignable : ' + err.message);
+    setText('detailMessage', 'Connexion impossible : ' + err.message);
   }
 }
 
-// ===== Formulaire (création et modification) =====
+// ===== Formulaire (création, modification, suppression) =====
 function fillSelect(select, group, placeholder) {
   select.replaceChildren();
   if (placeholder) select.appendChild(new Option(placeholder, ''));
@@ -275,6 +323,15 @@ function fillSelect(select, group, placeholder) {
 
 function setFormEnabled(enabled) {
   $('vehicleForm').querySelectorAll('input, select, button').forEach(function (x) { x.disabled = !enabled; });
+  $('deleteBtn').disabled = !enabled;
+}
+
+function fillForm(v) {
+  const form = $('vehicleForm');
+  FORM_FIELDS.forEach(function (f) {
+    if (f === 'current_counter' || !form.elements[f]) return;
+    form.elements[f].value = (v[f] === null || v[f] === undefined) ? '' : v[f];
+  });
 }
 
 async function showForm(vehicleId) {
@@ -287,6 +344,7 @@ async function showForm(vehicleId) {
   fillSelect(form.elements['status'], 'vehicle_status', null);
   fillSelect(form.elements['counter_unit'], 'counter_unit', null);
   $('currentCounterField').classList.toggle('hidden', !!vehicleId);
+  $('deleteBtn').classList.add('hidden');
 
   if (!vehicleId) {
     setText('formTitle', 'Nouveau véhicule');
@@ -297,21 +355,22 @@ async function showForm(vehicleId) {
   }
 
   setText('formTitle', 'Modifier le véhicule');
-  setFormEnabled(false);
-  $('cancelBtn').disabled = false;
-  try {
-    const res = await api('vehicles.get', { vehicleId: vehicleId });
-    if (!res.ok) return handleError(res, 'formMessage');
-    const v = res.data.vehicle;
-    if (!v.can_edit) return setText('formMessage', 'Tu ne peux pas modifier ce véhicule.');
-    FORM_FIELDS.forEach(function (f) {
-      if (f === 'current_counter' || !form.elements[f]) return;
-      form.elements[f].value = (v[f] === null || v[f] === undefined) ? '' : v[f];
-    });
-    setFormEnabled(true);
-  } catch (err) {
-    setText('formMessage', 'API injoignable : ' + err.message);
+  let v = cache.details[vehicleId];
+  if (!v) {
+    setFormEnabled(false);
+    $('cancelBtn').disabled = false;
+    try {
+      const res = await api('vehicles.get', { vehicleId: vehicleId });
+      if (!res.ok) return handleError(res, 'formMessage');
+      v = cache.details[vehicleId] = remember('detail:' + vehicleId, res.data.vehicle);
+    } catch (err) {
+      return setText('formMessage', 'Connexion impossible : ' + err.message);
+    }
   }
+  if (!v.can_edit) return setText('formMessage', 'Tu ne peux pas modifier ce véhicule.');
+  fillForm(v);
+  setFormEnabled(true);
+  $('deleteBtn').classList.remove('hidden');
 }
 
 async function submitForm(e) {
@@ -331,13 +390,39 @@ async function submitForm(e) {
     const action = editingVehicleId ? 'vehicles.update' : 'vehicles.create';
     const res = await api(action, { vehicleId: editingVehicleId, vehicle: payload });
     if (res.ok) {
+      const v = res.data.vehicle;
+      cache.details[v.vehicle_id] = remember('detail:' + v.vehicle_id, v);
+      delete cache.at.list;
       if (editingVehicleId) goBack(ROUTES.detail + encodeURIComponent(editingVehicleId));
-      else replaceRoute(ROUTES.detail + encodeURIComponent(res.data.vehicle.vehicle_id));
+      else replaceRoute(ROUTES.detail + encodeURIComponent(v.vehicle_id));
       return;
     }
     handleError(res, 'formMessage');
   } catch (err) {
-    setText('formMessage', 'API injoignable : ' + err.message);
+    setText('formMessage', 'Connexion impossible : ' + err.message);
+  } finally {
+    setFormEnabled(true);
+  }
+}
+
+async function deleteVehicle() {
+  const id = editingVehicleId;
+  const v = cache.details[id];
+  const name = v ? v.name : id;
+  if (!confirm('Supprimer définitivement « ' + name + ' » ?\n\nCette action est irréversible.')) return;
+
+  setText('formMessage', '');
+  setFormEnabled(false);
+  try {
+    const res = await api('vehicles.delete', { vehicleId: id });
+    if (res.ok) {
+      delete cache.details[id];
+      if (cache.vehicles) cache.vehicles = cache.vehicles.filter(function (x) { return x.vehicle_id !== id; });
+      return goHome();
+    }
+    handleError(res, 'formMessage');
+  } catch (err) {
+    setText('formMessage', 'Connexion impossible : ' + err.message);
   } finally {
     setFormEnabled(true);
   }
@@ -348,19 +433,25 @@ function cancelForm() {
 }
 
 // ===== Session =====
-async function loadLists() {
-  try {
-    const res = await api('lists.all');
-    if (res.ok) lists = res.data.lists;
-  } catch (err) { /* sans les listes, les clés brutes restent affichées */ }
+function enterApp(data) {
+  currentUser = data.user;
+  lists = data.lists || {};
+  clearCache();
+  cache.vehicles = remember('list', data.vehicles || []);
+  setVersion(data.version);
+  setText('userLabel', currentUser.name + (currentUser.role ? ' · ' + labelOf('user_role', currentUser.role) : ''));
+  show('viewApp');
+  route();
 }
 
-async function showApp(user) {
-  currentUser = user;
-  show('viewApp');
-  await loadLists();
-  setText('userLabel', user.name + (user.role ? ' · ' + labelOf('user_role', user.role) : ''));
-  route();
+async function bootstrap() {
+  try {
+    const res = await api('bootstrap');
+    if (res.ok) return enterApp(res.data);
+    showLogin(res.code === 'AUTH' ? '' : res.error);
+  } catch (err) {
+    showLogin('Connexion impossible : ' + err.message);
+  }
 }
 
 let gisReady = false;
@@ -382,11 +473,16 @@ function renderGoogleButton() {
 
 function showLogin(message) {
   currentUser = null;
+  clearCache();
   localStorage.removeItem(TOKEN_KEY);
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   show('viewLogin');
   renderGoogleButton();
   setText('loginMessage', message);
+  fetch(API_URL + '?action=ping')
+    .then(function (r) { return r.json(); })
+    .then(function (d) { setVersion(d.version); })
+    .catch(function () { setVersion(null); });
 }
 
 async function onGoogleCredential(response) {
@@ -395,9 +491,9 @@ async function onGoogleCredential(response) {
     const res = await api('login', { idToken: response.credential });
     if (!res.ok) return showLogin(res.error);
     localStorage.setItem(TOKEN_KEY, res.data.token);
-    showApp(res.data.user);
+    bootstrap();
   } catch (err) {
-    showLogin('API injoignable : ' + err.message);
+    showLogin('Connexion impossible : ' + err.message);
   }
 }
 
@@ -409,7 +505,13 @@ async function logout() {
 }
 
 // ===== Démarrage =====
-async function start() {
+function start() {
+  const del = el('button', 'btn-danger hidden', 'Supprimer ce véhicule');
+  del.type = 'button';
+  del.id = 'deleteBtn';
+  del.addEventListener('click', deleteVehicle);
+  $('formView').appendChild(del);
+
   $('logoutBtn').addEventListener('click', logout);
   $('backBtn').addEventListener('click', function () { goBack(''); });
   $('addBtn').addEventListener('click', function () { go(ROUTES.create); });
@@ -417,19 +519,8 @@ async function start() {
   $('vehicleForm').addEventListener('submit', submitForm);
   window.addEventListener('hashchange', route);
 
-  fetch(API_URL + '?action=ping')
-    .then(function (r) { return r.json(); })
-    .then(function (d) { document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'Version ' + d.version; }); })
-    .catch(function () { document.querySelectorAll('.js-version').forEach(function (n) { n.textContent = 'API injoignable'; }); });
-
   if (!localStorage.getItem(TOKEN_KEY)) return showLogin('');
-  try {
-    const res = await api('me');
-    if (res.ok) showApp(res.data.user);
-    else showLogin(res.code === 'AUTH' ? '' : res.error);
-  } catch (err) {
-    showLogin('API injoignable : ' + err.message);
-  }
+  bootstrap();
 }
 
 start();
