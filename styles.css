@@ -88,3 +88,11 @@ input, select {
 .form-actions { display:flex; justify-content:flex-end; gap:8px; margin:8px 0 24px; }
 
 footer { text-align:center; font-size:.8rem; color:var(--muted); padding:24px; }
+
+/* Suppression */
+.btn-danger {
+  display:block; margin:0 auto 32px; background:transparent; color:var(--ko);
+  border:1px solid var(--ko); border-radius:999px; padding:8px 16px;
+  font-family:inherit; font-size:.95rem; cursor:pointer;
+}
+.btn-danger:disabled { opacity:.5; cursor:default; }
