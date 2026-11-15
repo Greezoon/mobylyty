@@ -52,7 +52,9 @@
       <section id="listView">
         <div class="title-row">
           <h2 id="vehiclesTitle">Mes véhicules</h2>
-          <button id="addBtn" class="btn-primary" type="button">Ajouter un véhicule</button>
+          <div id="listActions" class="actions">
+            <button id="addBtn" class="btn-primary" type="button">Ajouter un véhicule</button>
+          </div>
         </div>
         <div id="listMessage" class="message"></div>
         <div id="vehicleList" class="grid"></div>
@@ -116,6 +118,7 @@
 
   <script src="config.js"></script>
   <script src="app.js"></script>
+    <script src="fuel.js"></script>
   <!-- Bibliothèque officielle Google, chargée après nos scripts -->
   <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
 </body>
