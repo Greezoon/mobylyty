@@ -139,9 +139,18 @@ function fmtMoney(n) {
   const whole = Math.round(Number(n) * 100) % 100 === 0;
   return Number(n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 });
 }
+const KM_PER_MILE = 1.609344;
+/** « ≈ 85 000 km » pour une valeur en miles, sinon null. */
+function kmEquivalent(value, unit) {
+  const n = Number(value);
+  if (unit !== 'miles' || isEmpty(value) || !isFinite(n)) return null;
+  return '≈ ' + fmtNum(n * KM_PER_MILE, 0) + ' km';
+}
 function fmtCounter(value, unit) {
   if (isEmpty(value)) return null;
-  return fmtNum(value, 1) + ' ' + (UNIT_SHORT[unit] || unit || 'km');
+  const base = fmtNum(value, 1) + ' ' + (UNIT_SHORT[unit] || unit || 'km');
+  const eq = kmEquivalent(value, unit);
+  return eq ? base + ' (' + eq + ')' : base;
 }
 function fmtDate(iso) {
   if (!iso) return null;

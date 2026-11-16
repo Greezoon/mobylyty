@@ -282,6 +282,8 @@ function garageCard(v) {
   if ('registration' in v) foot.appendChild(plate(v.registration));
   if ('current_counter' in v && !isEmpty(v.current_counter)) {
     foot.appendChild(odometer(v.current_counter, { pad: 6, unit: UNIT_SHORT[v.counter_unit] || 'km' }));
+    const eq = kmEquivalent(v.current_counter, v.counter_unit);
+    if (eq) foot.appendChild(el('span', 'km-eq', eq));
   }
   if (v.status && v.status !== 'active') foot.appendChild(el('span', 'badge', labelOf('vehicle_status', v.status)));
   if (foot.childNodes.length) card.appendChild(foot);
@@ -362,13 +364,19 @@ function renderVehicleHead(head, v, animate) {
   box.appendChild(backLink('Garage', function () { goBack(link('garage')); }));
   const top = el('div', 'vhead-top');
   const avatar = vehicleIcon(v);
-  if (v.can_edit) {
-    avatar.classList.add('editable');
+  function onAvatar() {
+    if (v.main_photo_id) {
+      openViewer([{ photo_id: v.main_photo_id, description: v.name }], 0, { change: v.can_edit ? function () { openProfilePhotoSheet(v); } : null });
+    } else if (v.can_edit) openProfilePhotoSheet(v);
+  }
+  if (v.main_photo_id || v.can_edit) {
+    avatar.classList.add('clickable');
+    if (v.can_edit) avatar.classList.add('editable');
     avatar.setAttribute('role', 'button');
     avatar.tabIndex = 0;
-    avatar.setAttribute('aria-label', 'Changer la photo de profil');
-    avatar.addEventListener('click', function () { openProfilePhotoSheet(v); });
-    avatar.addEventListener('keydown', function (e) { if (e.key === 'Enter') openProfilePhotoSheet(v); });
+    avatar.setAttribute('aria-label', v.main_photo_id ? 'Agrandir la photo de profil' : 'Ajouter une photo de profil');
+    avatar.addEventListener('click', onAvatar);
+    avatar.addEventListener('keydown', function (e) { if (e.key === 'Enter') onAvatar(); });
   }
   top.appendChild(avatar);
   const names = el('div');
@@ -387,6 +395,8 @@ function renderVehicleHead(head, v, animate) {
     if (isEmpty(v.current_counter)) left.appendChild(el('span', null, 'Compteur non renseigné'));
     else {
       left.appendChild(odometer(v.current_counter, { pad: 6, unit: UNIT_SHORT[v.counter_unit] || 'km', animate: animate, lastDrum: true }));
+      const eq = kmEquivalent(v.current_counter, v.counter_unit);
+      if (eq) left.appendChild(el('span', 'km-eq', eq));
       if (v.counter_reading_date) left.appendChild(el('small', null, 'Relevé du ' + fmtDate(v.counter_reading_date)));
     }
     c.appendChild(left);
@@ -404,6 +414,11 @@ function openCounterSheet(v) {
     sheet.appendChild(el('h2', null, 'Nouveau relevé'));
     const f = buildForm([{ name: 'counter', label: 'Compteur (' + (UNIT_SHORT[v.counter_unit] || 'km') + ')', kind: 'number', required: true,
       placeholder: isEmpty(v.current_counter) ? '' : 'Actuel : ' + fmtCounter(v.current_counter, v.counter_unit) }], {}, {});
+    if (v.counter_unit === 'miles') {
+      const hint = el('p', 'help km-eq-hint');
+      f.controls.counter.wrap.appendChild(hint);
+      f.controls.counter.input.addEventListener('input', function () { hint.textContent = kmEquivalent(parseNum(f.controls.counter.input.value), 'miles') || ''; });
+    }
     f.node.appendChild(formActions('Enregistrer le relevé', close));
     f.node.addEventListener('submit', async function (e) {
       e.preventDefault();
@@ -504,6 +519,17 @@ async function showVehicleForm(id) {
     fields.splice(8, 0, { name: 'owner_user_id', label: 'Propriétaire', kind: 'ref', noEmpty: true, required: true, default: state.user.user_id });
   }
   const f = buildForm(fields, v || {}, { isCreate: !id, refOptions: { owner_user_id: ownerOptions } });
+  ['purchase_counter', 'current_counter'].forEach(function (name) {
+    const c = f.controls[name];
+    const unit = f.controls.counter_unit;
+    if (!c || !unit) return;
+    const hint = el('p', 'help km-eq-hint');
+    c.wrap.appendChild(hint);
+    const upd = function () { hint.textContent = kmEquivalent(parseNum(c.input.value), unit.input.value) || ''; };
+    c.input.addEventListener('input', upd);
+    unit.input.addEventListener('change', upd);
+    upd();
+  });
   f.node.appendChild(formActions(id ? 'Enregistrer' : 'Ajouter le véhicule', function () { goBack(id ? link('v', id) : link('garage')); }));
   f.node.addEventListener('submit', async function (e) {
     e.preventDefault();

@@ -148,6 +148,12 @@
       two.append(field('Litres', liters, true), field('Montant (€)', amount, true));
       const counterField = field('Compteur (facultatif)', counter);
       const hint = el('p', 'hint');
+      const counterHint = el('p', 'hint km-eq-hint');
+      counterField.appendChild(counterHint);
+      counter.addEventListener('input', function () {
+        const vv = vehicles.find(function (x) { return x.vehicle_id === sel.value; });
+        counterHint.textContent = (vv && kmEquivalent(parseNum(counter.value), vv.counter_unit)) || '';
+      });
       const remove = button('Retirer ce véhicule', 'btn btn-ghost btn-small', function () { node.remove(); refresh(); });
       node.append(field('Véhicule', sel, true), field('Carburant', fuelSel), two, counterField, hint, remove);
 
@@ -156,6 +162,7 @@
         const v = vehicles.find(function (x) { return x.vehicle_id === sel.value; });
         counterField.classList.toggle('hidden', !(v && v.can_update_counter));
         counter.value = '';
+        counterHint.textContent = '';
         counter.placeholder = (v && !isEmpty(v.current_counter)) ? 'Actuel : ' + fmtCounter(v.current_counter, v.counter_unit) : '';
         const known = cached('fuel:' + sel.value);
         const last = known && known.fuel.find(function (x) { return x.fuel_type; });

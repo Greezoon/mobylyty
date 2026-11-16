@@ -119,6 +119,7 @@ function fillControl(f, name, value) {
 
 // ===== Réglages de l'assistant (clé personnelle) =====
 function showAssistantSettings() {
+  let paintModel = function () { /* défini plus bas */ };
   const view = mountView('settings');
   view.appendChild(backLink('Réglages', function () { goBack(link('reglages')); }));
   view.appendChild(el('h1', 'page-title', 'Assistant IA'));
@@ -134,7 +135,7 @@ function showAssistantSettings() {
   status.appendChild(stateLine);
 
   const steps = el('ol', 'steps');
-  [['Ouvre ', 'aistudio.google.com/apikey', ' avec ton compte Google.'], ['Clique sur « Créer une clé API » et copie-la.', null, ''], ['Colle-la ci-dessous, puis touche « Tester et enregistrer ».', null, '']].forEach(function (st) {
+  [['Ouvre ', 'aistudio.google.com/apikey', ' avec ton compte Google.'], ['Clique sur « Créer une clé API » et copie-la en entier (elle commence par AQ. ou AIza).', null, ''], ['Colle-la ci-dessous, puis touche « Tester et enregistrer ».', null, '']].forEach(function (st) {
     const li = el('li');
     li.appendChild(document.createTextNode(st[0]));
     if (st[1]) {
@@ -149,12 +150,12 @@ function showAssistantSettings() {
   });
   status.appendChild(steps);
 
-  const f = buildForm([{ name: 'key', label: 'Clé Gemini', kind: 'text', max: 80 }], {}, {});
+  const f = buildForm([{ name: 'key', label: 'Clé Gemini', kind: 'text', max: 200 }], {}, {});
   const keyInput = f.controls.key.input;
   keyInput.type = 'password';
   keyInput.autocomplete = 'off';
   keyInput.autocapitalize = 'none';
-  keyInput.placeholder = 'AIza…';
+  keyInput.placeholder = 'AQ.… (ou AIza…)';
   const row = el('div', 'row-actions');
   const save = el('button', 'btn btn-primary btn-small', 'Tester et enregistrer');
   save.type = 'submit';
@@ -186,6 +187,7 @@ function showAssistantSettings() {
     keyInput.value = '';
     f.message('');
     paintState();
+    paintModel();
     remove.classList.remove('hidden');
     toast('Assistant branché');
   });
@@ -194,13 +196,17 @@ function showAssistantSettings() {
 
   const info = el('section', 'logbook');
   info.appendChild(el('h3', null, 'À savoir'));
+  const modelNote = el('p', 'note');
+  paintModel = function () { modelNote.textContent = 'Modèle : ' + (state.ai.model || 'choisi automatiquement') + " (l'appli prend le plus récent disponible gratuitement)."; };
+  paintModel();
   [
     "Chacun branche sa propre clé : les questions de Florence passent par son compte, celles de Bertrand par le sien.",
     "C'est gratuit dans la limite d'un quota fixé par Google (affiché dans Google AI Studio). Si la limite est atteinte, l'assistant te le dit : réessaie plus tard.",
+    "Pour ne jamais rien payer : n'active pas la facturation sur ton projet Google. Sans facturation, Google bloque simplement les demandes au-delà du quota gratuit.",
     "Pour les personnes en Europe, les conditions de Google indiquent que les échanges ne servent pas à améliorer ses produits, même avec le quota gratuit. Vérifie sur ai.google.dev/terms.",
     "L'assistant reçoit uniquement les données que tu peux voir dans l'appli. Jamais les plaques, numéros de série ni emails.",
     "Ta clé est gardée côté serveur, jamais affichée en entier et jamais envoyée aux autres personnes."
   ].forEach(function (t) { info.appendChild(el('p', 'note', '• ' + t)); });
-  info.appendChild(el('p', 'note', 'Modèle utilisé : ' + (state.ai.model || '')));
+  info.appendChild(modelNote);
   view.appendChild(info);
 }

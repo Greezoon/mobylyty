@@ -11,7 +11,8 @@
   function kmLabel(m) {
     if (isEmpty(m.counter_start) || isEmpty(m.counter_end)) return null;
     const unit = m.vehicles[0] ? m.vehicles[0].counter_unit : 'km';
-    return fmtNum(m.counter_end - m.counter_start, 1) + ' ' + (UNIT_SHORT[unit] || 'km') + ' parcourus';
+    const eq = kmEquivalent(m.counter_end - m.counter_start, unit);
+    return fmtNum(m.counter_end - m.counter_start, 1) + ' ' + (UNIT_SHORT[unit] || 'km') + (eq ? ' (' + eq + ')' : '') + ' parcourus';
   }
   function invalidate() { stale(function (k) { return k.indexOf('mem') === 0 || k === 'dash'; }); forget(function (k) { return k.indexOf('hist:') === 0; }); }
 

@@ -127,12 +127,12 @@
 
     const photos = el('section', 'logbook');
     photos.appendChild(el('h3', null, 'Qualité des photos envoyées'));
-    photos.appendChild(segmented([['standard', 'Standard'], ['high', 'Haute'], ['max', 'Maximale']], getPref('photo', 'high'), function (v) { setPref('photo', v); hint(v); }));
+    photos.appendChild(segmented([['standard', 'Standard'], ['high', 'Haute'], ['max', 'Maximale']], getPref('photo', 'max'), function (v) { setPref('photo', v); hint(v); }));
     const note = el('p', 'note');
     function hint(v) {
-      note.textContent = { standard: 'Jusqu\'à 1600 px : rapide, léger.', high: 'Jusqu\'à 2560 px : très belle qualité, adaptée aux écrans et aux impressions courantes.', max: 'Jusqu\'à 4096 px : qualité maximale, envoi plus lent.' }[v];
+      note.textContent = { standard: 'Jusqu\'à 1600 px : rapide, léger.', high: 'Jusqu\'à 2560 px : très belle qualité.', max: 'Qualité d\'origine : ta photo JPEG est envoyée telle quelle si elle pèse moins de 5,5 Mo, sinon en 4096 px, qualité maximale.' }[v];
     }
-    hint(getPref('photo', 'high'));
+    hint(getPref('photo', 'max'));
     photos.appendChild(note);
     photos.appendChild(el('p', 'note', 'Les photos sont stockées en JPEG dans ton Google Drive. Les supprimer dans l\'appli les envoie aussi à la corbeille de ton Drive.'));
     view.appendChild(photos);
