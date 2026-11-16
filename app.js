@@ -26,11 +26,18 @@ const HISTORY_ICONS = {
 };
 const UNIT_SHORT = { km: 'km', miles: 'miles', hours: 'h' };
 
-const state = { user: null, lists: {}, schemas: {}, people: [], navDepth: 0 };
+const state = { user: null, lists: {}, schemas: {}, people: [], ai: { ready: false }, navDepth: 0 };
 
 // ===== Préférences d'affichage (enregistrées sur l'appareil) =====
 function getPref(name, fallback) { try { return localStorage.getItem('mobylyty_' + name) || fallback; } catch (e) { return fallback; } }
-function setPref(name, value) { try { localStorage.setItem('mobylyty_' + name, value); } catch (e) { /* stockage indisponible */ } applyPrefs(); }
+function setPref(name, value) {
+  try { localStorage.setItem('mobylyty_' + name, value); } catch (e) { /* stockage indisponible */ }
+  applyPrefs();
+  const prefs = {};
+  prefs[name] = value;
+  // Suivies d'un appareil à l'autre : enregistrées aussi sur le compte de la personne
+  if (state.user) api('prefs.save', { prefs: prefs }).catch(function () { /* l'appareil garde son réglage */ });
+}
 function applyPrefs() {
   const root = document.documentElement;
   const theme = getPref('theme', 'auto');
@@ -524,6 +531,9 @@ function enterApp(data) {
   state.lists = data.lists || {};
   state.schemas = data.schemas || {};
   state.people = data.people || [];
+  state.ai = data.ai || { ready: false };
+  Object.keys(data.prefs || {}).forEach(function (k) { try { localStorage.setItem('mobylyty_' + k, data.prefs[k]); } catch (e) { /* stockage indisponible */ } });
+  applyPrefs();
   forget(function () { return true; });
   put('list', { vehicles: data.vehicles || [] });
   if (data.dashboard) put('dash', data.dashboard);

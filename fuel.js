@@ -212,6 +212,17 @@
       back();
     });
 
+    const scan = scanButton('fuel', 'Scanner un ticket de carburant', function (fl) {
+      fillControl(station, 'date', fl.date);
+      fillControl(station, 'station', fl.station);
+      const first = currentLines()[0];
+      if (!first) return;
+      if (fl.liters !== undefined) { first.liters.value = String(fl.liters).replace('.', ','); first.liters.dispatchEvent(new Event('input')); }
+      if (fl.amount !== undefined) { first.amount.value = String(fl.amount).replace('.', ','); first.amount.dispatchEvent(new Event('input')); }
+      if (fl.fuel_type) first.fuel.value = fl.fuel_type;
+    });
+    form.before(scan);
+
     addLine(vehicleId && vehicles.some(function (v) { return v.vehicle_id === vehicleId; }) ? vehicleId : vehicles[0].vehicle_id);
   }
 })();

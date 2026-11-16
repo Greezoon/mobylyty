@@ -1,8 +1,20 @@
-/* MOBYLYTY : réglages (mon compte, affichage, proches et accès, listes, structure). */
+/* MOBYLYTY : réglages (mon compte, affichage, assistant IA, proches et accès par personne, listes, structure). */
 'use strict';
 (function () {
   const isAdmin = function () { return state.user && state.user.role === 'admin'; };
   const SETTINGS_KEY = 'settings';
+
+  const TOPIC_ICONS = {
+    vehicle_info: '🪪', counter_usage: '🔢', fuel_consumption: '⛽', maintenance_controls: '🔧', tasks_memos: '📝',
+    projects: '🏁', finances: '💶', documents: '📄', photos: '📷', memories: '🛣️', history: '🕑'
+  };
+  // Réglages rapides : sujets MASQUÉS pour chaque formule
+  const PRESETS = [
+    { id: 'full', icon: '👁️', label: 'Tout voir', mode: 'full', hide: [] },
+    { id: 'nofin', icon: '💶', label: 'Tout sauf les finances', mode: 'restricted', hide: ['finances'] },
+    { id: 'fun', icon: '📷', label: 'Photos et balades', mode: 'restricted', hide: ['vehicle_info', 'counter_usage', 'fuel_consumption', 'maintenance_controls', 'tasks_memos', 'projects', 'finances', 'documents', 'history'] },
+    { id: 'drive', icon: '⛽', label: 'Carburant et entretien', mode: 'restricted', hide: ['vehicle_info', 'projects', 'finances', 'documents', 'photos', 'memories', 'history'] }
+  ];
 
   function page(title, backTo, backLabel) {
     const view = mountView('settings');
@@ -32,16 +44,19 @@
     return b;
   }
 
+  function initial(name) { return String(name || '?').trim().charAt(0).toUpperCase() || '?'; }
+
   // ===== Page principale =====
   addRoute('reglages', function (parts) {
     const sub = parts[0];
     if (!sub) return showMain();
-    if (!isAdmin() && sub !== 'affichage') return replaceRoute(link('reglages'));
+    if (!isAdmin() && sub !== 'affichage' && sub !== 'assistant') return replaceRoute(link('reglages'));
     if (sub === 'proches') return showUsers();
     if (sub === 'proche') return showUser(parts[1]);
     if (sub === 'listes') return showLists();
     if (sub === 'base') return showBase();
     if (sub === 'affichage') return showDisplay();
+    if (sub === 'assistant') return showAssistantSettings();
     showMain();
   });
 
@@ -64,7 +79,7 @@
       if (!d) return;
       state.user.name = d.user.name;
       if (d.people) state.people = d.people;
-      $('userBtn').textContent = String(d.user.name).charAt(0).toUpperCase();
+      $('userBtn').textContent = initial(d.user.name);
       forget(function (k) { return k === SETTINGS_KEY; });
       toast('Prénom enregistré');
     });
@@ -72,9 +87,10 @@
     view.appendChild(me);
 
     const menu = el('div', 'items');
-    menu.appendChild(menuRow('🎨', 'Affichage', 'Thème et taille du texte', function () { go(link('reglages', 'affichage')); }));
+    menu.appendChild(menuRow('🎨', 'Affichage et photos', 'Thème, taille du texte, qualité des photos', function () { go(link('reglages', 'affichage')); }));
+    menu.appendChild(menuRow('✨', 'Assistant IA', state.ai.ready ? 'Branché : ta clé Gemini est active' : 'Brancher ma clé Gemini gratuite', function () { go(link('reglages', 'assistant')); }));
     if (isAdmin()) {
-      menu.appendChild(menuRow('👨‍👩‍👧', 'Proches et accès', 'Qui utilise l\'appli et ce qu\'il peut voir', function () { go(link('reglages', 'proches')); }));
+      menu.appendChild(menuRow('👨‍👩‍👧', 'Proches et accès', 'Qui utilise l\'appli et ce que chacun peut voir', function () { go(link('reglages', 'proches')); }));
       menu.appendChild(menuRow('🗂️', 'Listes', 'Catégories, carburants, types de balades…', function () { go(link('reglages', 'listes')); }));
       menu.appendChild(menuRow('🧰', 'Base de données', 'Vérifier et mettre à jour la structure', function () { go(link('reglages', 'base')); }));
     }
@@ -101,22 +117,63 @@
   }
 
   function showDisplay() {
-    const view = page('Affichage', link('reglages'));
+    const view = page('Affichage et photos', link('reglages'));
     const box = el('section', 'logbook');
     box.appendChild(el('h3', null, 'Thème'));
     box.appendChild(segmented([['auto', 'Automatique'], ['light', 'Clair'], ['dark', 'Sombre']], getPref('theme', 'auto'), function (v) { setPref('theme', v); }));
     box.appendChild(el('h3', null, 'Taille du texte'));
     box.appendChild(segmented([['normal', 'Normale'], ['large', 'Grande']], getPref('size', 'normal'), function (v) { setPref('size', v); }));
-    box.appendChild(el('p', 'note', 'Ces choix sont enregistrés sur cet appareil.'));
     view.appendChild(box);
+
+    const photos = el('section', 'logbook');
+    photos.appendChild(el('h3', null, 'Qualité des photos envoyées'));
+    photos.appendChild(segmented([['standard', 'Standard'], ['high', 'Haute'], ['max', 'Maximale']], getPref('photo', 'high'), function (v) { setPref('photo', v); hint(v); }));
+    const note = el('p', 'note');
+    function hint(v) {
+      note.textContent = { standard: 'Jusqu\'à 1600 px : rapide, léger.', high: 'Jusqu\'à 2560 px : très belle qualité, adaptée aux écrans et aux impressions courantes.', max: 'Jusqu\'à 4096 px : qualité maximale, envoi plus lent.' }[v];
+    }
+    hint(getPref('photo', 'high'));
+    photos.appendChild(note);
+    photos.appendChild(el('p', 'note', 'Les photos sont stockées en JPEG dans ton Google Drive. Les supprimer dans l\'appli les envoie aussi à la corbeille de ton Drive.'));
+    view.appendChild(photos);
+    view.appendChild(el('p', 'note', 'Ces choix te suivent sur tous tes appareils.'));
   }
 
-  // ===== Proches =====
-  function userCard(u, onClick) {
-    const card = button('', 'item', onClick);
-    card.appendChild(el('span', 'item-title', u.name));
-    card.appendChild(el('span', 'badge', labelOf('user_role', u.role)));
-    card.appendChild(el('span', 'item-sub', [u.email, u.status !== 'active' ? 'désactivé' : (u.has_logged_in ? '' : 'jamais connecté')].filter(Boolean).join(', ')));
+  // ===== Proches : liste visuelle =====
+  function accessChips(u, d) {
+    const box = el('div', 'access-chips');
+    if (u.role === 'admin') { box.appendChild(el('span', 'achip full', '👑 Voit et gère tout')); return box; }
+    let n = 0;
+    d.vehicles.forEach(function (v) {
+      let kind = null;
+      let icon = '';
+      if (v.owner_user_id === u.user_id) { kind = 'owner'; icon = '🔑'; }
+      else {
+        const a = d.authorizations.find(function (x) { return x.user_id === u.user_id && x.vehicle_id === v.vehicle_id && x.status === 'active'; });
+        if (a) { kind = a.mode === 'full' ? 'full' : 'part'; icon = a.mode === 'full' ? '👁️' : '🎛️'; }
+      }
+      if (!kind) return;
+      n++;
+      if (n <= 4) box.appendChild(el('span', 'achip ' + kind, icon + ' ' + (v.name || v.vehicle_id)));
+    });
+    if (n > 4) box.appendChild(el('span', 'achip', '+' + (n - 4)));
+    if (!n) box.appendChild(el('span', 'achip none', 'Aucun véhicule'));
+    return box;
+  }
+
+  function personCard(u, d, onClick) {
+    const card = button('', 'person-card' + (u.status !== 'active' ? ' off' : ''), onClick);
+    card.appendChild(el('span', 'person-avatar', initial(u.name)));
+    const t = el('span', 'person-txt');
+    const top = el('span', 'person-top');
+    top.appendChild(el('b', null, u.name));
+    top.appendChild(el('span', 'badge', labelOf('user_role', u.role)));
+    if (u.status !== 'active') top.appendChild(el('span', 'badge', 'Désactivé'));
+    else if (!u.has_logged_in) top.appendChild(el('span', 'badge', 'Jamais connecté'));
+    t.appendChild(top);
+    t.appendChild(el('small', null, u.email));
+    t.appendChild(accessChips(u, d));
+    card.appendChild(t);
     return card;
   }
 
@@ -147,7 +204,7 @@
           if (d.people) state.people = d.people;
           forget(function (k) { return k === SETTINGS_KEY; });
           close();
-          toast(d.user.name + ' ajouté. Il pourra se connecter avec son compte Google.');
+          toast(d.user.name + ' ajouté. Choisis maintenant ce qu\'il peut voir.');
           go(link('reglages', 'proche', d.user.user_id));
         });
         sheet.appendChild(f.node);
@@ -156,23 +213,48 @@
     loadSettings(view, function (body, d) {
       body.replaceChildren();
       const list = el('div', 'items');
-      d.users.forEach(function (u) { list.appendChild(userCard(u, function () { go(link('reglages', 'proche', u.user_id)); })); });
+      d.users.forEach(function (u) { list.appendChild(personCard(u, d, function () { go(link('reglages', 'proche', u.user_id)); })); });
       body.appendChild(list);
-      body.appendChild(el('p', 'note', 'Pour donner accès à l\'appli : ajoute la personne, puis ouvre sa fiche pour choisir les véhicules qu\'elle peut voir.'));
+      body.appendChild(el('p', 'note', 'Touche une personne pour choisir, véhicule par véhicule, ce qu\'elle peut voir et faire.'));
+      body.appendChild(legend());
     });
   }
 
+  function legend() {
+    const box = el('div', 'legend');
+    [['🔑', 'Propriétaire : tous les droits'], ['👁️', 'Voit tout'], ['🎛️', 'Voit une partie']].forEach(function (l) {
+      const s = el('span', 'legend-item');
+      s.append(el('span', null, l[0]), document.createTextNode(' ' + l[1]));
+      box.appendChild(s);
+    });
+    return box;
+  }
+
+  // ===== Une personne =====
   function showUser(userId) {
-    const view = page('Proche', link('reglages', 'proches'), 'Proches');
+    const view = page('', link('reglages', 'proches'), 'Proches');
+    const title = view.querySelector('h1');
     loadSettings(view, function (body, d) {
       const u = d.users.find(function (x) { return x.user_id === userId; });
       body.replaceChildren();
       if (!u) { body.appendChild(errorBox('Personne introuvable.')); return; }
-      view.querySelector('h1').textContent = u.name;
+      title.textContent = '';
+      const isMe = u.user_id === state.user.user_id;
+
+      const head = el('section', 'person-head');
+      head.appendChild(el('span', 'person-avatar big', initial(u.name)));
+      const ht = el('div');
+      ht.appendChild(el('h2', null, u.name));
+      ht.appendChild(el('p', 'muted', u.email));
+      const badges = el('div', 'access-chips');
+      badges.appendChild(el('span', 'badge', labelOf('user_role', u.role)));
+      badges.appendChild(el('span', 'badge', u.status === 'active' ? (u.has_logged_in ? 'Connecté' : 'Jamais connecté') : 'Désactivé'));
+      ht.appendChild(badges);
+      head.appendChild(ht);
+      body.appendChild(head);
 
       const box = el('section', 'logbook');
       box.appendChild(el('h3', null, 'Identité'));
-      const isMe = u.user_id === state.user.user_id;
       const fields = userFields().filter(function (f) { return !(isMe && (f.name === 'role' || f.name === 'status')); });
       const f = buildForm(fields, u, {});
       const save = el('button', 'btn btn-primary btn-small', 'Enregistrer');
@@ -193,58 +275,145 @@
         route();
       });
       box.appendChild(f.node);
-      if (!u.has_logged_in) box.appendChild(el('p', 'note', 'Cette personne ne s\'est pas encore connectée. Si tu changes son adresse, elle devra se reconnecter avec le nouveau compte Google.'));
+      if (!u.has_logged_in) box.appendChild(el('p', 'note', 'Si tu changes son adresse, cette personne devra se reconnecter avec le nouveau compte Google.'));
       body.appendChild(box);
 
-      if (u.role === 'admin') { body.appendChild(el('p', 'note', 'Un administrateur voit déjà tous les véhicules et peut tout modifier.')); return; }
+      if (u.role === 'admin') { body.appendChild(el('p', 'note', '👑 Un administrateur voit déjà tous les véhicules et peut tout modifier.')); return; }
 
-      body.appendChild(el('h2', 'block-title', 'Accès aux véhicules'));
-      d.vehicles.forEach(function (v) { body.appendChild(accessBlock(u, v, d)); });
+      body.appendChild(el('h2', 'block-title', 'Ce que ' + u.name + ' peut voir'));
+      body.appendChild(el('p', 'note', 'Voir une rubrique permet aussi d\'y ajouter des éléments (un plein, une tâche, une photo, une balade…). Seul le propriétaire peut modifier ou supprimer.'));
+
+      const blocks = [];
+      const targets = d.vehicles.filter(function (v) { return v.owner_user_id !== u.user_id; });
+      if (targets.length > 1) body.appendChild(bulkBar(u, targets, blocks, d));
+      d.vehicles.forEach(function (v) {
+        const blk = accessCard(u, v, d);
+        blocks.push(blk);
+        body.appendChild(blk.node);
+      });
       if (!d.vehicles.length) body.appendChild(emptyState('Aucun véhicule dans le garage.'));
     });
   }
 
-  function accessBlock(u, v, d) {
-    const box = el('section', 'logbook access');
-    box.appendChild(el('h3', null, iconOf(v.category) + ' ' + (v.name || v.vehicle_id)));
+  /** Applique une même formule à tous les véhicules de la personne. */
+  function bulkBar(u, targets, blocks, d) {
+    const box = el('section', 'logbook bulk');
+    box.appendChild(el('h3', null, 'Pour tous les véhicules à la fois'));
+    const row = el('div', 'preset-grid');
+    PRESETS.concat([{ id: 'none', icon: '🚫', label: 'Aucun accès', mode: 'none', hide: [] }]).forEach(function (p) {
+      const b = button('', 'preset', async function () {
+        const ok = await confirmDialog('Appliquer « ' + p.label + ' » ?', 'Cela remplace l\'accès de ' + u.name + ' sur ' + targets.length + ' véhicules.', 'Appliquer');
+        if (!ok) return;
+        b.disabled = true;
+        let done = 0;
+        for (let i = 0; i < targets.length; i++) {
+          const res = await send('settings.access.save', { access: { userId: u.user_id, vehicleId: targets[i].vehicle_id, access: p.mode, excluded: p.hide } }, toast);
+          if (!res) break;
+          done++;
+        }
+        b.disabled = false;
+        forget(function (k) { return k === SETTINGS_KEY; });
+        if (done === targets.length) { toast('Accès mis à jour pour ' + done + ' véhicules'); route(); }
+      });
+      b.appendChild(el('span', 'preset-icon', p.icon));
+      b.appendChild(el('span', null, p.label));
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+    return box;
+  }
+
+  /** Bloc d'accès d'une personne à UN véhicule : trois grosses tuiles, puis les rubriques. */
+  function accessCard(u, v, d) {
+    const box = el('section', 'access-card');
+    const head = el('div', 'access-head');
+    const ico = el('span', 'car-icon small', iconOf(v.category));
+    if (v.main_photo_id) paintThumb(ico, v.main_photo_id, function () { ico.textContent = ''; });
+    head.appendChild(ico);
+    head.appendChild(el('b', null, v.name || v.vehicle_id));
+    box.appendChild(head);
+
     if (v.owner_user_id === u.user_id) {
-      box.appendChild(el('p', 'note', 'Propriétaire : tous les droits.'));
-      return box;
+      box.appendChild(el('p', 'note', '🔑 ' + u.name + ' est propriétaire : tous les droits sur ce véhicule.'));
+      return { node: box };
     }
+
     const row = d.authorizations.find(function (a) { return a.user_id === u.user_id && a.vehicle_id === v.vehicle_id; });
     let mode = (row && row.status === 'active') ? row.mode : 'none';
-    const excluded = (row && row.status === 'active') ? row.excluded.slice() : [];
+    const hidden = {};
+    ((row && row.status === 'active') ? row.excluded : []).forEach(function (t) { hidden[t] = true; });
+    let dirty = false;
 
-    const topics = el('div', 'checks');
-    const checks = {};
-    d.topics.forEach(function (t) {
-      const label = el('label', 'check');
-      const input = el('input');
-      input.type = 'checkbox';
-      input.checked = excluded.indexOf(t.key) !== -1;
-      checks[t.key] = input;
-      label.append(input, el('span', null, t.label));
-      topics.appendChild(label);
+    const tiles = el('div', 'tiles');
+    const tileDefs = [['none', '🚫', 'Aucun', 'Ne le voit pas'], ['full', '👁️', 'Tout voir', 'Toutes les rubriques'], ['restricted', '🎛️', 'Au choix', 'Rubrique par rubrique']];
+    const tileButtons = {};
+    tileDefs.forEach(function (t) {
+      const b = button('', 'tile', function () { mode = t[0]; dirty = true; sync(); });
+      b.setAttribute('aria-pressed', 'false');
+      b.appendChild(el('span', 'tile-icon', t[1]));
+      b.appendChild(el('b', null, t[2]));
+      b.appendChild(el('small', null, t[3]));
+      tiles.appendChild(b);
+      tileButtons[t[0]] = b;
     });
-    const hint = el('p', 'note', 'Coche ce que cette personne ne doit pas voir.');
-    const zone = el('div');
-    zone.append(hint, topics);
+    box.appendChild(tiles);
+
+    const zone = el('div', 'topics-zone');
+    const presetRow = el('div', 'chips-row');
+    PRESETS.filter(function (p) { return p.mode === 'restricted'; }).forEach(function (p) {
+      presetRow.appendChild(button(p.icon + ' ' + p.label, 'tab', function () {
+        Object.keys(hidden).forEach(function (k) { delete hidden[k]; });
+        p.hide.forEach(function (t) { hidden[t] = true; });
+        dirty = true;
+        sync();
+      }));
+    });
+    zone.appendChild(presetRow);
+    const grid = el('div', 'topic-grid');
+    const topicButtons = {};
+    d.topics.forEach(function (t) {
+      const b = button('', 'topic', function () { if (hidden[t.key]) delete hidden[t.key]; else hidden[t.key] = true; dirty = true; sync(); });
+      b.appendChild(el('span', 'topic-icon', TOPIC_ICONS[t.key] || '•'));
+      b.appendChild(el('span', 'topic-label', t.label));
+      b.appendChild(el('span', 'topic-state'));
+      grid.appendChild(b);
+      topicButtons[t.key] = b;
+    });
+    zone.appendChild(grid);
+    box.appendChild(zone);
+
     const msg = el('p', 'form-message');
-    const saveBtn = button('Enregistrer cet accès', 'btn btn-primary btn-small', async function () {
+    const saveBtn = button('Enregistrer cet accès', 'btn btn-small', async function () {
       saveBtn.disabled = true;
       msg.textContent = '';
-      const hidden = Object.keys(checks).filter(function (k) { return checks[k].checked; });
-      const res = await send('settings.access.save', { access: { userId: u.user_id, vehicleId: v.vehicle_id, access: mode, excluded: hidden } }, function (m) { msg.textContent = m; });
+      const res = await send('settings.access.save', { access: { userId: u.user_id, vehicleId: v.vehicle_id, access: mode, excluded: Object.keys(hidden) } }, function (m) { msg.textContent = m; });
       saveBtn.disabled = false;
       if (!res) return;
+      dirty = false;
       forget(function (k) { return k === SETTINGS_KEY; });
       toast('Accès enregistré');
+      sync();
     });
-    function sync() { zone.classList.toggle('hidden', mode !== 'restricted'); }
-    box.appendChild(segmented([['none', 'Aucun'], ['full', 'Complet'], ['restricted', 'Restreint']], mode, function (m) { mode = m; sync(); }));
-    box.append(zone, msg, saveBtn);
+    box.append(msg, saveBtn);
+
+    function sync() {
+      Object.keys(tileButtons).forEach(function (k) {
+        tileButtons[k].classList.toggle('on', k === mode);
+        tileButtons[k].setAttribute('aria-pressed', k === mode ? 'true' : 'false');
+      });
+      zone.classList.toggle('hidden', mode !== 'restricted');
+      Object.keys(topicButtons).forEach(function (k) {
+        const off = !!hidden[k];
+        topicButtons[k].classList.toggle('off', off);
+        topicButtons[k].setAttribute('aria-pressed', off ? 'false' : 'true');
+        topicButtons[k].querySelector('.topic-state').textContent = off ? 'Masqué' : 'Visible';
+      });
+      saveBtn.classList.toggle('btn-primary', dirty);
+      saveBtn.classList.toggle('btn-ghost', !dirty);
+      saveBtn.textContent = dirty ? 'Enregistrer cet accès' : 'Accès à jour';
+    }
     sync();
-    return box;
+    return { node: box };
   }
 
   // ===== Listes =====
@@ -261,6 +430,12 @@
       });
       const holder = el('div');
       body.append(tabs, holder);
+
+      function store(lists) {
+        d.lists = lists;
+        put(SETTINGS_KEY, Object.assign({}, cached(SETTINGS_KEY), { lists: lists }));
+        refreshLists();
+      }
 
       function render() {
         tabs.querySelectorAll('.tab').forEach(function (t, i) { t.classList.toggle('active', names[i] === group); });
@@ -285,9 +460,7 @@
           const res = await send('settings.list.add', { group: group, label: input.value.trim() }, function (m) { msg.textContent = m; });
           btn.disabled = false;
           if (!res) return;
-          d.lists = res.lists;
-          put(SETTINGS_KEY, Object.assign({}, cached(SETTINGS_KEY), { lists: res.lists }));
-          refreshLists();
+          store(res.lists);
           toast('Valeur ajoutée');
           render();
         });
@@ -303,9 +476,7 @@
         input.addEventListener('change', async function () {
           const res = await send('settings.list.update', { id: val.id, value: { label: input.value } }, function (m) { toast(m); input.value = val.label; });
           if (!res) return;
-          d.lists = res.lists;
-          put(SETTINGS_KEY, Object.assign({}, cached(SETTINGS_KEY), { lists: res.lists }));
-          refreshLists();
+          store(res.lists);
           toast('Libellé enregistré');
         });
         row.appendChild(input);
@@ -319,9 +490,7 @@
           cb.addEventListener('change', async function () {
             const res = await send('settings.list.update', { id: val.id, value: { active: cb.checked } }, function (m) { toast(m); cb.checked = !cb.checked; });
             if (!res) return;
-            d.lists = res.lists;
-            put(SETTINGS_KEY, Object.assign({}, cached(SETTINGS_KEY), { lists: res.lists }));
-            refreshLists();
+            store(res.lists);
             toast(cb.checked ? 'Valeur affichée' : 'Valeur masquée');
           });
           sw.append(el('span', null, 'Afficher'), cb);
@@ -361,7 +530,7 @@
 
     const drive = el('section', 'logbook');
     drive.appendChild(el('h3', null, 'Photos'));
-    drive.appendChild(el('p', 'note', 'Les photos sont rangées dans le dossier « MOBYLYTY photos » de ton Google Drive, en privé. Les supprimer dans l\'appli les retire aussi du Drive.'));
+    drive.appendChild(el('p', 'note', 'Les photos sont rangées dans le dossier « MOBYLYTY photos » de ton Google Drive, en privé. Les supprimer dans l\'appli les envoie aussi à la corbeille de ton Drive.'));
     view.appendChild(drive);
   }
 })();

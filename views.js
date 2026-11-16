@@ -64,6 +64,7 @@ function renderDashboard(body, d, animate) {
   facts.appendChild(el('span', 'fact', s.vehicles + (s.vehicles > 1 ? ' véhicules' : ' véhicule')));
   if (s.open_tasks) facts.appendChild(el('span', 'fact', s.open_tasks + (s.open_tasks > 1 ? ' tâches ouvertes' : ' tâche ouverte')));
   body.appendChild(facts);
+  if (typeof assistantEntry === 'function') body.appendChild(assistantEntry());
 
   const title = el('h2', 'block-title', 'À prévoir');
   body.appendChild(title);
@@ -120,47 +121,171 @@ function timeline(events, withVehicle, unit) {
   return ul;
 }
 
-// ===== Garage =====
+// ===== Garage : recherche, filtres, tri =====
+const GARAGE_KEY = 'mobylyty_garage';
+const GARAGE_SORTS = [
+  ['name', 'Nom (A → Z)'], ['make', 'Marque (A → Z)'], ['type', 'Type de véhicule'],
+  ['year_desc', 'Année : du plus récent'], ['year_asc', 'Année : du plus ancien'],
+  ['purchase', "Date d'achat : la plus récente"], ['counter', 'Compteur : du plus élevé']
+];
+
+function loadGarageState() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(GARAGE_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  return { q: '', sort: GARAGE_SORTS.some(function (x) { return x[0] === saved.sort; }) ? saved.sort : 'name', category: saved.category || '', status: saved.status || '' };
+}
+function saveGarageState(g) { try { localStorage.setItem(GARAGE_KEY, JSON.stringify({ sort: g.sort, category: g.category, status: g.status })); } catch (e) { /* stockage indisponible */ } }
+
+function plain(s) { return String(s === null || s === undefined ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function cmpText(a, b) { return String(a || '').localeCompare(String(b || ''), 'fr', { sensitivity: 'base' }); }
+function cmpNum(a, b, desc) {
+  const na = isEmpty(a) ? null : Number(a);
+  const nb = isEmpty(b) ? null : Number(b);
+  if (na === null && nb === null) return 0;
+  if (na === null) return 1;
+  if (nb === null) return -1;
+  return desc ? nb - na : na - nb;
+}
+function cmpDateDesc(a, b) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return String(b).localeCompare(String(a));
+}
+
+function sortVehicles(list, sort) {
+  const byName = function (a, b) { return cmpText(a.name, b.name); };
+  const fn = {
+    name: byName,
+    make: function (a, b) { return cmpText(a.make, b.make) || byName(a, b); },
+    type: function (a, b) { return cmpText(labelOf('vehicle_category', a.category), labelOf('vehicle_category', b.category)) || byName(a, b); },
+    year_desc: function (a, b) { return cmpNum(a.year, b.year, true) || byName(a, b); },
+    year_asc: function (a, b) { return cmpNum(a.year, b.year, false) || byName(a, b); },
+    purchase: function (a, b) { return cmpDateDesc(a.purchase_date, b.purchase_date) || byName(a, b); },
+    counter: function (a, b) { return cmpNum(a.current_counter, b.current_counter, true) || byName(a, b); }
+  }[sort] || byName;
+  return list.slice().sort(fn);
+}
+
+function matchesSearch(v, q) {
+  if (!q) return true;
+  const hay = plain([v.name, v.make, v.model, v.version, v.year, v.registration, labelOf('vehicle_category', v.category)].join(' '));
+  return q.split(/\s+/).filter(Boolean).every(function (w) { return hay.indexOf(w) !== -1; });
+}
+
 addRoute('garage', function () {
   const view = mountView('garage');
   const head = el('div', 'title-row');
   head.appendChild(el('h1', 'page-title', 'Garage'));
   head.appendChild(button('Ajouter un véhicule', 'btn btn-primary btn-small', function () { go(link('nouveau-vehicule')); }));
   view.appendChild(head);
-  const list = el('div');
-  view.appendChild(list);
 
-  load('list', function () { return api('vehicles.list'); }, function (data) {
-    renderGarage(list, data.vehicles);
-  }, {
-    loading: function () { list.replaceChildren(skeleton(3)); },
-    error: function (msg, had) { if (!had) list.replaceChildren(errorBox(msg)); },
+  const g = loadGarageState();
+  const search = el('input', 'search');
+  search.type = 'search';
+  search.placeholder = 'Rechercher : nom, marque, plaque…';
+  search.setAttribute('aria-label', 'Rechercher un véhicule');
+  search.autocomplete = 'off';
+  const sortSel = el('select', 'sort-select');
+  sortSel.setAttribute('aria-label', 'Trier les véhicules');
+  GARAGE_SORTS.forEach(function (o) { sortSel.appendChild(new Option(o[1], o[0])); });
+  sortSel.value = g.sort;
+  const bar = el('div', 'garage-bar');
+  bar.append(search, sortSel);
+  const chips = el('div', 'chips-box');
+  const info = el('p', 'result-count');
+  const results = el('div');
+  view.append(bar, chips, info, results);
+
+  let vehicles = null;
+  function reset() { g.q = ''; g.category = ''; g.status = ''; search.value = ''; saveGarageState(g); paint(); }
+
+  function chipRow(title, entries, current, onPick) {
+    const row = el('div', 'chips-row');
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', title);
+    entries.forEach(function (e) {
+      row.appendChild(button(e[1], 'tab' + (e[0] === current ? ' active' : ''), function () { onPick(e[0]); }));
+    });
+    return row;
+  }
+
+  function paint() {
+    if (!vehicles) return;
+    chips.replaceChildren();
+    results.replaceChildren();
+    info.replaceChildren();
+    if (!vehicles.length) {
+      results.appendChild(emptyState('Ton garage est vide. Ajoute ton premier véhicule.', 'Ajouter un véhicule', function () { go(link('nouveau-vehicule')); }));
+      bar.classList.add('hidden');
+      return;
+    }
+    bar.classList.remove('hidden');
+
+    const cats = {};
+    const statuses = {};
+    vehicles.forEach(function (v) { cats[v.category || ''] = (cats[v.category || ''] || 0) + 1; statuses[v.status || 'active'] = (statuses[v.status || 'active'] || 0) + 1; });
+    if (g.category && !cats[g.category]) g.category = '';
+    if (g.status && !statuses[g.status]) g.status = '';
+    const catKeys = Object.keys(cats).sort(function (a, b) { return cmpText(labelOf('vehicle_category', a), labelOf('vehicle_category', b)); });
+    if (catKeys.length > 1) {
+      chips.appendChild(chipRow('Filtrer par type', [['', 'Tous les types']].concat(catKeys.map(function (k) { return [k, (labelOf('vehicle_category', k) || 'Sans type') + ' (' + cats[k] + ')']; })), g.category, function (k) { g.category = k; saveGarageState(g); paint(); }));
+    }
+    const statKeys = Object.keys(statuses);
+    if (statKeys.length > 1) {
+      chips.appendChild(chipRow('Filtrer par statut', [['', 'Tous les statuts']].concat(statKeys.map(function (k) { return [k, (labelOf('vehicle_status', k) || k) + ' (' + statuses[k] + ')']; })), g.status, function (k) { g.status = k; saveGarageState(g); paint(); }));
+    }
+
+    const q = plain(g.q).trim();
+    const filtered = sortVehicles(vehicles.filter(function (v) {
+      return matchesSearch(v, q) && (!g.category || (v.category || '') === g.category) && (!g.status || (v.status || 'active') === g.status);
+    }), g.sort);
+
+    const active = !!(q || g.category || g.status);
+    info.appendChild(document.createTextNode(filtered.length + (filtered.length > 1 ? ' véhicules' : ' véhicule') + (active ? ' sur ' + vehicles.length : '') + ' '));
+    if (active) info.appendChild(button('Tout afficher', 'btn-link-plain', reset));
+
+    if (!filtered.length) { results.appendChild(emptyState('Aucun véhicule ne correspond à ta recherche.', 'Tout afficher', reset)); return; }
+
+    const groupBy = g.sort === 'make' ? function (v) { return v.make || 'Marque inconnue'; }
+      : (g.sort === 'type' ? function (v) { return labelOf('vehicle_category', v.category) || 'Sans type'; } : null);
+    let lastGroup = null;
+    let grid = null;
+    filtered.forEach(function (v) {
+      const gr = groupBy ? groupBy(v) : '';
+      if (!grid || gr !== lastGroup) {
+        if (groupBy) results.appendChild(el('h2', 'group-title', gr));
+        grid = el('div', 'garage');
+        results.appendChild(grid);
+        lastGroup = gr;
+      }
+      grid.appendChild(garageCard(v));
+    });
+  }
+
+  search.addEventListener('input', function () { g.q = search.value; paint(); });
+  sortSel.addEventListener('change', function () { g.sort = sortSel.value; saveGarageState(g); paint(); });
+
+  load('list', function () { return api('vehicles.list'); }, function (data) { vehicles = data.vehicles; paint(); }, {
+    loading: function () { results.replaceChildren(skeleton(3)); },
+    error: function (msg, had) { if (!had) results.replaceChildren(errorBox(msg)); },
     stillHere: function () { return view.isConnected; }
   });
 });
 
-function renderGarage(list, vehicles) {
-  list.replaceChildren();
-  if (!vehicles.length) {
-    list.appendChild(emptyState('Ton garage est vide. Ajoute ton premier véhicule.', 'Ajouter un véhicule', function () { go(link('nouveau-vehicule')); }));
-    return;
+function garageCard(v) {
+  const card = button('', 'car', function () { go(link('v', v.vehicle_id)); });
+  card.appendChild(vehicleIcon(v));
+  card.appendChild(el('span', 'car-name', v.name || v.vehicle_id));
+  card.appendChild(el('span', 'car-desc', describe(v)));
+  const foot = el('span', 'car-foot');
+  if ('registration' in v) foot.appendChild(plate(v.registration));
+  if ('current_counter' in v && !isEmpty(v.current_counter)) {
+    foot.appendChild(odometer(v.current_counter, { pad: 6, unit: UNIT_SHORT[v.counter_unit] || 'km' }));
   }
-  const grid = el('div', 'garage');
-  vehicles.forEach(function (v) {
-    const card = button('', 'car', function () { go(link('v', v.vehicle_id)); });
-    card.appendChild(vehicleIcon(v));
-    card.appendChild(el('span', 'car-name', v.name || v.vehicle_id));
-    card.appendChild(el('span', 'car-desc', describe(v)));
-    const foot = el('span', 'car-foot');
-    if ('registration' in v) foot.appendChild(plate(v.registration));
-    if ('current_counter' in v && !isEmpty(v.current_counter)) {
-      foot.appendChild(odometer(v.current_counter, { pad: 6, unit: UNIT_SHORT[v.counter_unit] || 'km' }));
-    }
-    if (v.status && v.status !== 'active') foot.appendChild(el('span', 'badge', labelOf('vehicle_status', v.status)));
-    if (foot.childNodes.length) card.appendChild(foot);
-    grid.appendChild(card);
-  });
-  list.appendChild(grid);
+  if (v.status && v.status !== 'active') foot.appendChild(el('span', 'badge', labelOf('vehicle_status', v.status)));
+  if (foot.childNodes.length) card.appendChild(foot);
+  return card;
 }
 
 // ===== Fiche véhicule =====

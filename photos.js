@@ -93,18 +93,27 @@ function readImage(file) {
   });
 }
 
-function toJpegBase64(img, maxSide, quality) {
-  const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
-  canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+const PHOTO_PRESETS = { standard: [1600, 0.8], high: [2560, 0.9], max: [4096, 0.92] };
+
+/** JPEG redimensionné en base64. Si le résultat dépasse maxLen, on baisse d'abord la qualité, puis la taille. */
+function toJpegBase64(img, maxSide, quality, maxLen) {
+  maxLen = maxLen || 7500000;
+  let side = maxSide;
   let q = quality;
-  let data = canvas.toDataURL('image/jpeg', q).split(',')[1];
-  while (data.length > 3000000 && q > 0.4) { q -= 0.15; data = canvas.toDataURL('image/jpeg', q).split(',')[1]; }
+  let data = '';
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const k = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    data = canvas.toDataURL('image/jpeg', q).split(',')[1];
+    if (data.length <= maxLen) return data;
+    if (q > 0.6) q -= 0.1; else side = Math.round(side * 0.85);
+  }
   return data;
 }
 
@@ -119,8 +128,9 @@ async function uploadPhotos(files, base) {
     let image, thumb;
     try {
       const img = await readImage(files[i]);
-      image = toJpegBase64(img, 1600, 0.8);
-      thumb = toJpegBase64(img, 360, 0.7);
+      const preset = PHOTO_PRESETS[getPref('photo', 'high')] || PHOTO_PRESETS.high;
+      image = toJpegBase64(img, preset[0], preset[1], 7500000);
+      thumb = toJpegBase64(img, 480, 0.75, 380000);
     } catch (err) { toast(err.message); break; }
     let failed = false;
     const data = await send('photos.upload', { photo: Object.assign({}, base, { image: image, thumb: thumb }) }, function (m) { failed = true; toast(m); });

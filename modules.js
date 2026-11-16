@@ -568,7 +568,12 @@
       toast(id ? 'Modifications enregistrées' : 'Ajouté');
       afterSave();
     });
-    holder.replaceChildren(f.node);
+    if (type === 'expenses' && !id) {
+      holder.replaceChildren(scanButton('expense', 'Scanner une facture', function (fl) {
+        ['description', 'amount', 'date', 'supplier', 'category', 'counter'].forEach(function (n) { fillControl(f, n, fl[n]); });
+        f.refresh();
+      }), f.node);
+    } else holder.replaceChildren(f.node);
 
     if (id) {
       const zone = el('div', 'danger-zone');
