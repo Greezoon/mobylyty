@@ -148,7 +148,7 @@ function renderGarage(list, vehicles) {
   const grid = el('div', 'garage');
   vehicles.forEach(function (v) {
     const card = button('', 'car', function () { go(link('v', v.vehicle_id)); });
-    card.appendChild(el('span', 'car-icon', iconOf(v.category)));
+    card.appendChild(vehicleIcon(v));
     card.appendChild(el('span', 'car-name', v.name || v.vehicle_id));
     card.appendChild(el('span', 'car-desc', describe(v)));
     const foot = el('span', 'car-foot');
@@ -236,7 +236,16 @@ function renderVehicleHead(head, v, animate) {
   const box = el('section', 'vhead');
   box.appendChild(backLink('Garage', function () { goBack(link('garage')); }));
   const top = el('div', 'vhead-top');
-  top.appendChild(el('span', 'car-icon', iconOf(v.category)));
+  const avatar = vehicleIcon(v);
+  if (v.can_edit) {
+    avatar.classList.add('editable');
+    avatar.setAttribute('role', 'button');
+    avatar.tabIndex = 0;
+    avatar.setAttribute('aria-label', 'Changer la photo de profil');
+    avatar.addEventListener('click', function () { openProfilePhotoSheet(v); });
+    avatar.addEventListener('keydown', function (e) { if (e.key === 'Enter') openProfilePhotoSheet(v); });
+  }
+  top.appendChild(avatar);
   const names = el('div');
   names.appendChild(el('h1', null, v.name || v.vehicle_id));
   names.appendChild(el('div', 'vhead-desc', describe(v)));
@@ -364,7 +373,12 @@ async function showVehicleForm(id) {
     if (!v.can_edit) { holder.replaceChildren(errorBox('Tu ne peux pas modifier ce véhicule.')); return; }
   }
 
-  const f = buildForm(VEHICLE_FIELDS, v || {}, { isCreate: !id });
+  const ownerOptions = state.people.map(function (p) { return [p.user_id, p.name]; });
+  const fields = VEHICLE_FIELDS.slice();
+  if (state.user.role === 'admin') {
+    fields.splice(8, 0, { name: 'owner_user_id', label: 'Propriétaire', kind: 'ref', noEmpty: true, required: true, default: state.user.user_id });
+  }
+  const f = buildForm(fields, v || {}, { isCreate: !id, refOptions: { owner_user_id: ownerOptions } });
   f.node.appendChild(formActions(id ? 'Enregistrer' : 'Ajouter le véhicule', function () { goBack(id ? link('v', id) : link('garage')); }));
   f.node.addEventListener('submit', async function (e) {
     e.preventDefault();

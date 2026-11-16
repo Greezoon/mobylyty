@@ -254,31 +254,228 @@
   }
 
   // ===== Projets =====
+  function projectCard(v, data, p) {
+    const card = button('', 'item', function () { go(link('projet', v.vehicle_id, p.id)); });
+    card.appendChild(el('span', 'item-title', p.name));
+    card.appendChild(el('span', 'badge', labelOf('project_status', p.status)));
+    card.appendChild(gauge((p.progress || 0) / 100, p.status === 'completed' ? '' : 'soon'));
+    const sub = [];
+    sub.push(p.parts_total ? p.parts_done + ' pièce' + (p.parts_done > 1 ? 's' : '') + ' sur ' + p.parts_total : p.progress + ' % réalisé');
+    if ('actual_spend' in p) sub.push(fmtMoney(p.actual_spend || 0) + ' dépensés' + (p.remaining_cost ? ', ' + fmtMoney(p.remaining_cost) + ' à prévoir' : ''));
+    if (p.planned_end && p.status !== 'completed') sub.push('fin le ' + fmtDate(p.planned_end));
+    card.appendChild(el('span', 'item-sub', sub.join(', ')));
+    return card;
+  }
+
   moduleTab('projects', 50, function (body, v, data) {
     body.appendChild(toolbar('Restaurations et améliorations', addButton('projects', v, data, 'Nouveau projet')));
     if (!data.items.length) {
-      body.appendChild(emptyState('Suis tes chantiers : budget, avancement et dépenses rattachées.',
+      body.appendChild(emptyState('Suis tes chantiers : liste de pièces à cocher avec liens et prix, avancement et argent dépensé.',
         data.can_create ? 'Nouveau projet' : null, function () { go(link('ajout', 'projects', v.vehicle_id)); }));
       return;
     }
     const list = el('div', 'items');
-    data.items.forEach(function (p) {
-      const card = el(data.can_edit ? 'button' : 'div', 'item');
-      if (data.can_edit) { card.type = 'button'; card.addEventListener('click', function () { openEdit('projects', v, p); }); }
-      card.appendChild(el('span', 'item-title', p.name));
-      card.appendChild(el('span', 'badge', labelOf('project_status', p.status)));
-      card.appendChild(gauge((p.progress || 0) / 100, p.status === 'completed' ? '' : 'soon'));
-      const sub = [p.progress + ' % réalisé'];
-      if ('actual_spend' in p) {
-        sub.push(isEmpty(p.planned_budget) ? fmtMoney(p.actual_spend || 0) + ' dépensés' : fmtMoney(p.actual_spend || 0) + ' dépensés sur ' + fmtMoney(p.planned_budget));
-      }
-      if (p.planned_end && p.status !== 'completed') sub.push('fin prévue le ' + fmtDate(p.planned_end));
-      card.appendChild(el('span', 'item-sub', sub.join(', ')));
-      if (p.budget_ratio && p.budget_ratio > 1) card.appendChild(el('span', 'item-sub item-due overdue', 'Budget dépassé de ' + fmtMoney(p.actual_spend - p.planned_budget)));
-      list.appendChild(card);
-    });
+    data.items.forEach(function (p) { list.appendChild(projectCard(v, data, p)); });
     body.appendChild(list);
   });
+
+  function safeUrl(u) { return /^https?:\/\//i.test(String(u || '')) ? u : null; }
+
+  addRoute('projet', function (parts) { showProject(parts[0], parts[1]); });
+
+  function showProject(vehicleId, projectId) {
+    const view = mountView('garage');
+    const tabLink = link('v', vehicleId, 'projets');
+    view.appendChild(backLink('Projets', function () { goBack(tabLink); }));
+    const body = el('div');
+    view.appendChild(body);
+    const key = recKey('projects', vehicleId);
+
+    function find(data) { return data.items.find(function (i) { return i.id === projectId; }); }
+    function paint(data) {
+      const p = find(data);
+      if (!p) { body.replaceChildren(errorBox('Projet introuvable.')); return; }
+      renderProject(body, vehicleId, p, data, refresh);
+    }
+    /** Redemande les projets sans quitter la page (la position de défilement est conservée). */
+    async function refresh() {
+      const res = await send('records.list', { type: 'projects', vehicleId: vehicleId }, toast);
+      if (!res) return;
+      put(key, res);
+      forgetVehicle(vehicleId);
+      put(key, res);
+      if (body.isConnected) paint(res);
+    }
+    load(key, loadRecords('projects', vehicleId), paint, {
+      loading: function () { body.replaceChildren(skeleton(3)); },
+      error: function (msg, had) { if (!had) body.replaceChildren(errorBox(msg)); },
+      stillHere: function () { return view.isConnected; }
+    });
+  }
+
+  function projectRange(p) {
+    if (p.planned_start && p.planned_end) return 'Du ' + fmtDate(p.planned_start) + ' au ' + fmtDate(p.planned_end);
+    if (p.planned_start) return 'Débuté le ' + fmtDate(p.planned_start);
+    if (p.planned_end) return "Jusqu'au " + fmtDate(p.planned_end);
+    return '';
+  }
+
+  function renderProject(body, vehicleId, p, data, refresh) {
+    body.replaceChildren();
+    const head = el('section', 'vhead memory-head');
+    const top = el('div', 'vhead-top');
+    top.appendChild(el('span', 'car-icon', '🏁'));
+    const names = el('div');
+    names.appendChild(el('h1', null, p.name));
+    names.appendChild(el('div', 'vhead-desc', [labelOf('project_status', p.status), projectRange(p)].filter(Boolean).join(', ')));
+    top.appendChild(names);
+    head.appendChild(top);
+    if (p.description) head.appendChild(el('p', 'vhead-desc memory-meta', p.description));
+    const g = gauge((p.progress || 0) / 100, p.status === 'completed' ? '' : 'soon');
+    g.classList.add('on-dark');
+    head.appendChild(g);
+    head.appendChild(el('p', 'vhead-desc memory-meta', p.parts_total
+      ? p.parts_done + ' pièce' + (p.parts_done > 1 ? 's' : '') + ' sur ' + p.parts_total + ' (' + p.progress + ' %)'
+      : p.progress + ' % réalisé'));
+    if (data.can_edit) {
+      const actions = el('div', 'row-actions');
+      actions.appendChild(button('Modifier le projet', 'btn btn-ghost btn-small', function () { go(link('edition', 'projects', vehicleId, p.id)); }));
+      head.appendChild(actions);
+    }
+    body.appendChild(head);
+
+    if ('actual_spend' in p) {
+      const total = (p.actual_spend || 0) + (p.remaining_cost || 0);
+      const rows = [
+        ['Dépensé', fmtMoney(p.actual_spend || 0)],
+        ['Reste à dépenser', fmtMoney(p.remaining_cost || 0)],
+        ['Total prévu', fmtMoney(total)]
+      ];
+      if (!isEmpty(p.planned_budget)) rows.push(['Budget', fmtMoney(p.planned_budget)]);
+      const money = logbook('Argent', rows);
+      if (p.planned_budget && total > p.planned_budget) {
+        money.appendChild(el('p', 'note over', 'Le total prévu dépasse le budget de ' + fmtMoney(total - p.planned_budget) + '.'));
+      }
+      body.appendChild(money);
+    }
+
+    body.appendChild(el('h2', 'block-title', 'Pièces et étapes'));
+    const list = el('div', 'items');
+    if (!p.parts.length) list.appendChild(emptyState('Ajoute les pièces ou étapes du projet, avec un lien et un prix. Coche-les au fur et à mesure : l\'argent dépensé suit.'));
+    p.parts.forEach(function (part) { list.appendChild(partRow(vehicleId, p, part, data, refresh)); });
+    body.appendChild(list);
+
+    if (data.can_edit) body.appendChild(partAddForm(vehicleId, p, refresh));
+    body.appendChild(el('p', 'note', "Une pièce cochée avec un prix devient automatiquement une dépense du véhicule : inutile de la saisir deux fois."));
+  }
+
+  const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  function partRow(vehicleId, project, part, data, refresh) {
+    const row = el('div', 'item task part' + (part.done ? ' closed' : ''));
+    const check = button('', 'checkbtn' + (part.done ? ' done' : ''));
+    check.innerHTML = CHECK;
+    check.setAttribute('aria-label', part.done ? 'Décocher' : 'Cocher');
+    if (!data.can_edit) check.disabled = true;
+    check.addEventListener('click', async function () {
+      const next = !check.classList.contains('done');
+      check.classList.toggle('done', next);
+      check.disabled = true;
+      const res = await send('parts.toggle', { id: part.id, done: next }, function (m) { check.classList.toggle('done', !next); toast(m); });
+      check.disabled = false;
+      if (!res) return;
+      forgetVehicle(vehicleId);
+      stale(function (k) { return k.indexOf('hist:') === 0 || k === recKey('expenses', vehicleId); });
+      setTimeout(refresh, REDUCED_MOTION ? 0 : 350);
+    });
+    row.appendChild(check);
+    const title = el('span', 'item-title', part.name);
+    row.appendChild(title);
+    row.appendChild(el('span', 'item-amount', isEmpty(part.price) ? '' : fmtMoney(part.price)));
+    const sub = el('span', 'item-sub');
+    const url = safeUrl(part.url);
+    if (url) {
+      const a = el('a', 'ext-link', 'Voir le lien');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      sub.appendChild(a);
+    }
+    if (part.done && part.done_date) sub.appendChild(document.createTextNode((url ? ', ' : '') + 'fait le ' + fmtDate(part.done_date)));
+    if (sub.childNodes.length) row.appendChild(sub);
+    if (data.can_edit) {
+      title.style.cursor = 'pointer';
+      title.addEventListener('click', function () { openPartSheet(vehicleId, project, part, refresh); });
+    }
+    return row;
+  }
+
+  function partFields(seesPrice) {
+    return [
+      { name: 'name', label: 'Pièce ou étape', kind: 'text', max: 100, required: true, placeholder: 'Ex. Kit embrayage' },
+      { name: 'url', label: 'Lien', kind: 'url', placeholder: 'https://…' },
+      seesPrice ? { name: 'price', label: 'Prix (€)', kind: 'number' } : null
+    ].filter(Boolean);
+  }
+
+  function partAddForm(vehicleId, project, refresh) {
+    const seesPrice = 'actual_spend' in project;
+    const box = el('section', 'logbook add-part');
+    box.appendChild(el('h3', null, 'Ajouter une pièce'));
+    const f = buildForm(partFields(seesPrice), {}, { isCreate: true });
+    const add = el('button', 'btn btn-primary btn-small', 'Ajouter');
+    add.type = 'submit';
+    f.node.appendChild(add);
+    f.node.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const values = f.read();
+      if (!values) return;
+      values.project_id = project.id;
+      f.busy(true);
+      const res = await send('records.create', { type: 'parts', vehicleId: vehicleId, record: values }, f.message);
+      f.busy(false);
+      if (!res) return;
+      forgetVehicle(vehicleId);
+      toast('Pièce ajoutée');
+      f.node.reset();
+      refresh();
+    });
+    box.appendChild(f.node);
+    return box;
+  }
+
+  function openPartSheet(vehicleId, project, part, refresh) {
+    const seesPrice = 'actual_spend' in project;
+    openSheet(function (sheet, close) {
+      sheet.appendChild(el('h2', null, 'Modifier la pièce'));
+      const f = buildForm(partFields(seesPrice), part, {});
+      f.node.appendChild(formActions('Enregistrer', close));
+      f.node.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const values = f.read();
+        if (!values) return;
+        f.busy(true);
+        const res = await send('records.update', { type: 'parts', id: part.id, record: values }, f.message);
+        f.busy(false);
+        if (!res) return;
+        forgetVehicle(vehicleId);
+        close();
+        toast('Pièce modifiée');
+        refresh();
+      });
+      sheet.appendChild(f.node);
+      const del = button('Supprimer cette pièce', 'btn btn-danger btn-block', async function () {
+        const ok = await confirmDialog('Supprimer « ' + part.name + ' » ?', part.done && part.price ? 'La dépense créée en la cochant sera aussi supprimée.' : 'Cette action est irréversible.');
+        if (!ok) return;
+        const res = await send('records.delete', { type: 'parts', id: part.id }, toast);
+        if (!res) return;
+        forgetVehicle(vehicleId);
+        toast('Pièce supprimée');
+        refresh();
+      });
+      sheet.appendChild(del);
+    });
+  }
 
   // ===== Historique =====
   addTab({

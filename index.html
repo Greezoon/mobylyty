@@ -53,12 +53,20 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>
         <span>Accueil</span>
       </a>
-      <button id="fab" class="fab" type="button" aria-label="Ajouter">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
       <a class="navlink" data-nav="garage" href="#/garage">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20V9l9-5 9 5v11M7 20v-7h10v7M7 16h10"/></svg>
         <span>Garage</span>
+      </a>
+      <button id="fab" class="fab" type="button" aria-label="Ajouter">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <a class="navlink" data-nav="balades" href="#/balades">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/></svg>
+        <span>Balades</span>
+      </a>
+      <a class="navlink" data-nav="settings" href="#/reglages">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>
+        <span>Réglages</span>
       </a>
     </nav>
   </div>
@@ -69,8 +77,11 @@
   <script src="config.js"></script>
   <script src="app.js"></script>
   <script src="views.js"></script>
+  <script src="photos.js"></script>
   <script src="fuel.js"></script>
   <script src="modules.js"></script>
+  <script src="memories.js"></script>
+  <script src="settings.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
 </body>
 </html>

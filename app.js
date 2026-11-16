@@ -1,6 +1,14 @@
 /* MOBYLYTY : cœur de l'appli (API, mémoire, navigation, composants communs). Configuration : config.js */
 'use strict';
 
+// Compatibilité avec les anciens navigateurs (Safari 13 et antérieurs)
+if (!Element.prototype.replaceChildren) {
+  Element.prototype.replaceChildren = function () {
+    while (this.firstChild) this.removeChild(this.firstChild);
+    for (let i = 0; i < arguments.length; i++) this.append(arguments[i]);
+  };
+}
+
 const TOKEN_KEY = 'mobylyty_token';
 const FRESH_MS = 30000; // une donnée vue il y a moins de 30 s n'est pas redemandée
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -18,7 +26,18 @@ const HISTORY_ICONS = {
 };
 const UNIT_SHORT = { km: 'km', miles: 'miles', hours: 'h' };
 
-const state = { user: null, lists: {}, schemas: {}, navDepth: 0 };
+const state = { user: null, lists: {}, schemas: {}, people: [], navDepth: 0 };
+
+// ===== Préférences d'affichage (enregistrées sur l'appareil) =====
+function getPref(name, fallback) { try { return localStorage.getItem('mobylyty_' + name) || fallback; } catch (e) { return fallback; } }
+function setPref(name, value) { try { localStorage.setItem('mobylyty_' + name, value); } catch (e) { /* stockage indisponible */ } applyPrefs(); }
+function applyPrefs() {
+  const root = document.documentElement;
+  const theme = getPref('theme', 'auto');
+  if (theme === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme);
+  root.setAttribute('data-size', getPref('size', 'normal'));
+}
+applyPrefs();
 
 // ===== API (POST en texte brut : le jeton ne passe jamais dans l'adresse) =====
 async function api(action, payload) {
@@ -375,7 +394,7 @@ function buildForm(fields, values, opts) {
     Object.keys(controls).forEach(function (name) {
       const c = controls[name];
       const f = c.field;
-      const shown = !f.showIf || f.showIf.values.indexOf(String(vals[f.showIf.field])) !== -1;
+      const shown = (!f.showIf || f.showIf.values.indexOf(String(vals[f.showIf.field])) !== -1) && (!f.showWhen || !!f.showWhen());
       c.wrap.classList.toggle('hidden', !shown);
       if (f.helpBy && c.help) {
         const key = f.showIf ? vals[f.showIf.field] : null;
@@ -421,13 +440,14 @@ function buildForm(fields, values, opts) {
         const options = f.kind === 'choice'
           ? (state.lists[f.group] || []).filter(function (i) { return !f.exclude || f.exclude.indexOf(i.key) === -1; }).map(function (i) { return [i.key, i.label]; })
           : (f.kind === 'static' ? f.options : ((opts.refOptions || {})[f.name] || []));
-        if (!f.required || f.kind === 'ref') input.appendChild(new Option(f.kind === 'ref' ? 'Aucun' : '—', ''));
+        if ((!f.required || f.kind === 'ref') && !f.noEmpty) input.appendChild(new Option(f.kind === 'ref' ? 'Aucun' : '—', ''));
         options.forEach(function (o) { input.appendChild(new Option(o[1], o[0])); });
       } else {
         input = el('input');
         if (f.kind === 'date') input.type = 'date';
         else if (f.kind === 'number') input.inputMode = 'decimal';
         else if (f.kind === 'integer') input.inputMode = 'numeric';
+        else if (f.kind === 'url') { input.type = 'url'; input.inputMode = 'url'; input.autocapitalize = 'none'; }
         if (f.max && (f.kind === 'text')) input.maxLength = f.max;
         input.autocomplete = 'off';
       }
@@ -455,6 +475,7 @@ function buildForm(fields, values, opts) {
   return {
     node: form,
     controls: controls,
+    refresh: refresh,
     message: function (text) { message.textContent = text || ''; },
     /** Valeurs des champs affichés ; null (avec message) si un champ obligatoire est vide. */
     read: function () {
@@ -502,6 +523,7 @@ function enterApp(data) {
   state.user = data.user;
   state.lists = data.lists || {};
   state.schemas = data.schemas || {};
+  state.people = data.people || [];
   forget(function () { return true; });
   put('list', { vehicles: data.vehicles || [] });
   if (data.dashboard) put('dash', data.dashboard);
@@ -538,6 +560,7 @@ function renderGoogleButton() {
 function showLogin(message) {
   state.user = null;
   forget(function () { return true; });
+  if (typeof clearThumbStore === 'function') clearThumbStore();
   closeLayer();
   localStorage.removeItem(TOKEN_KEY);
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -560,29 +583,17 @@ async function onGoogleCredential(response) {
   }
 }
 
-function openAccount() {
-  openSheet(function (sheet, close) {
-    sheet.appendChild(el('h2', null, state.user.name));
-    sheet.appendChild(el('p', 'muted', [state.user.email, labelOf('user_role', state.user.role)].filter(Boolean).join(', ')));
-    const menu = el('div', 'menu');
-    const out = button('', 'menu-item', async function () {
-      close();
-      showScreen('screenLoading');
-      try { await api('logout'); } catch (err) { /* la session locale est supprimée quoi qu'il arrive */ }
-      if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
-      showLogin('');
-    });
-    out.appendChild(el('span', 'mi-icon', '🚪'));
-    out.appendChild(el('b', null, 'Se déconnecter'));
-    menu.appendChild(out);
-    sheet.appendChild(menu);
-    if (state.version) sheet.appendChild(el('p', 'muted', 'Version ' + state.version));
-  });
+async function doLogout() {
+  closeLayer();
+  showScreen('screenLoading');
+  try { await api('logout'); } catch (err) { /* la session locale est supprimée quoi qu'il arrive */ }
+  if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+  showLogin('');
 }
 
 // ===== Démarrage, une fois tous les fichiers chargés =====
 function start() {
-  $('userBtn').addEventListener('click', openAccount);
+  $('userBtn').addEventListener('click', function () { go(link('reglages')); });
   $('fab').addEventListener('click', function () { if (typeof openQuickAdd === 'function') openQuickAdd(); });
   window.addEventListener('hashchange', route);
   if (!localStorage.getItem(TOKEN_KEY)) return showLogin('');
